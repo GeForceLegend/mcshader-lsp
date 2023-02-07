@@ -26,7 +26,6 @@ use std::io::{stdin, stdout, BufRead, BufReader};
 use std::iter::{Extend, FromIterator};
 use std::rc::Rc;
 use std::str::FromStr;
-use std::sync::Mutex;
 
 use std::{
     cell::RefCell,
@@ -693,14 +692,8 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
 
                 info!("got updated configuration"; "config" => params.settings.as_object().unwrap().get("mcglsl").unwrap().to_string());
 
-                let curr_file_extensions = &self.file_extensions.clone();
                 // Remove all current extensions does not exist in BASIC_FILE_EXTENSIONS
-                for raw_extension in curr_file_extensions {
-                    let extension = OsString::from(raw_extension);
-                    if !BASIC_FILE_EXTENSIONS.contains(&extension) {
-                        self.file_extensions.remove(&extension);
-                    }
-                }
+                self.file_extensions.clone_from(&BASIC_FILE_EXTENSIONS);
                 // Add extensions provided by new configuration
                 for extension in config.extra_extension {
                     self.file_extensions.insert(OsString::from(extension));
