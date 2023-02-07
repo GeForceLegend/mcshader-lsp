@@ -75,6 +75,11 @@
           "default": "info",
           "enum": ["trace", "debug", "info", "warn", "error"],
           "description": "Change the log level of the language server. This change happens live and does not require a restart."
+        },
+        "mcglsl.extraExtension": {
+          "type": "array",
+          "default": ["inc"],
+          "description": "Extra file extensions support"
         }
       }
     }

@@ -19,12 +19,14 @@ use walkdir::WalkDir;
 
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::ffi::OsString;
 use std::fmt::{Debug, Display, Formatter};
 use std::fs;
 use std::io::{stdin, stdout, BufRead, BufReader};
 use std::iter::{Extend, FromIterator};
 use std::rc::Rc;
 use std::str::FromStr;
+use std::sync::Mutex;
 
 use std::{
     cell::RefCell,
@@ -132,6 +134,23 @@ lazy_static! {
         }
         set
     };
+    static ref BASIC_FILE_EXTENSIONS: HashSet<OsString> = {
+        let mut set = HashSet::with_capacity(14);
+        set.insert(OsString::from("vsh"));
+        set.insert(OsString::from("gsh"));
+        set.insert(OsString::from("fsh"));
+        set.insert(OsString::from("csh"));
+        set.insert(OsString::from("vert"));
+        set.insert(OsString::from("geom"));
+        set.insert(OsString::from("frag"));
+        set.insert(OsString::from("comp"));
+        set.insert(OsString::from("vertex"));
+        set.insert(OsString::from("geometry"));
+        set.insert(OsString::from("fragment"));
+        set.insert(OsString::from("compute"));
+        set.insert(OsString::from("glsl"));
+        set
+    };
 }
 
 fn main() {
@@ -152,6 +171,7 @@ fn main() {
         opengl_context: Rc::new(opengl::OpenGlContext::new()),
         tree_sitter: Rc::new(RefCell::new(parser)),
         log_guard: Some(guard),
+        file_extensions: BASIC_FILE_EXTENSIONS.clone(),
     };
 
     langserver.command_provider = Some(commands::CustomCommandProvider::new(vec![
@@ -186,6 +206,7 @@ pub struct MinecraftShaderLanguageServer {
     opengl_context: Rc<dyn opengl::ShaderValidator>,
     tree_sitter: Rc<RefCell<Parser>>,
     log_guard: Option<slog_scope::GlobalLoggerGuard>,
+    file_extensions: HashSet<OsString>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -250,8 +271,7 @@ impl MinecraftShaderLanguageServer {
                     None => return None,
                 };
 
-                // TODO: include user added extensions with a set
-                if ext != "vsh" && ext != "fsh" && ext  != "csh" && ext != "gsh" && ext != "glsl" && ext != "inc" {
+                if !self.file_extensions.contains(ext) {
                     return None;
                 }
 
@@ -664,12 +684,36 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
             struct Configuration {
                 #[serde(alias = "logLevel")]
                 log_level: String,
+                #[serde(alias = "extraExtension")]
+                extra_extension: HashSet<String>,
             }
 
             if let Some(settings) = params.settings.as_object().unwrap().get("mcglsl") {
                 let config: Configuration = from_value(settings.to_owned()).unwrap();
 
                 info!("got updated configuration"; "config" => params.settings.as_object().unwrap().get("mcglsl").unwrap().to_string());
+
+                let curr_file_extensions = &self.file_extensions.clone();
+                // Remove all current extensions does not exist in BASIC_FILE_EXTENSIONS
+                for raw_extension in curr_file_extensions {
+                    let extension = OsString::from(raw_extension);
+                    if !BASIC_FILE_EXTENSIONS.contains(&extension) {
+                        self.file_extensions.remove(&extension);
+                    }
+                }
+                // Add extensions provided by new configuration
+                for extension in config.extra_extension {
+                    self.file_extensions.insert(OsString::from(extension));
+                }
+
+                // Rebuilt dependency graph to add files with new extensions to graph
+                info!("rebuilding dependency graph with changed configuration");
+                self.set_status("loading", "Rebuilding dependency graph...", "$(loading~spin)");
+
+                self.graph = Rc::new(RefCell::new(graph::CachedStableGraph::new()));
+                self.build_initial_graph();
+
+                self.set_status("ready", "Project reinitialized", "$(check)");
 
                 configuration::handle_log_level_change(config.log_level, |level| {
                     self.log_guard = None; // set to None so Drop is invoked

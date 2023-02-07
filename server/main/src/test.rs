@@ -44,6 +44,7 @@ pub fn new_temp_server(opengl_context: Option<Box<dyn opengl::ShaderValidator>>)
         opengl_context: context.into(),
         log_guard: None,
         tree_sitter: Rc::new(RefCell::new(Parser::new())),
+        file_extensions: HashSet::new(),
     }
 }
 
