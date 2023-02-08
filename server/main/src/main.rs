@@ -54,6 +54,7 @@ mod lsp_ext;
 mod merge_views;
 mod navigation;
 mod opengl;
+mod shaders;
 mod source_mapper;
 mod url_norm;
 
@@ -81,10 +82,11 @@ lazy_static! {
             set.insert(format!("prepare.{}", ext));
             set.insert(format!("shadowcomp.{}", ext));
             for i in 1..=99 {
-                set.insert(format!("composite{}.{}", i, ext));
-                set.insert(format!("deferred{}.{}", i, ext));
-                set.insert(format!("prepare{}.{}", i, ext));
-                set.insert(format!("shadowcomp{}.{}", i, ext));
+                let total_suffix = format!("{}.{}", i, ext);
+                set.insert(format!("composite{}", total_suffix));
+                set.insert(format!("deferred{}", total_suffix));
+                set.insert(format!("prepare{}", total_suffix));
+                set.insert(format!("shadowcomp{}", total_suffix));
             }
             set.insert(format!("composite_pre.{}", ext));
             set.insert(format!("deferred_pre.{}", ext));
@@ -171,6 +173,8 @@ fn main() {
         tree_sitter: Rc::new(RefCell::new(parser)),
         log_guard: Some(guard),
         file_extensions: BASIC_FILE_EXTENSIONS.clone(),
+        shader_files: HashMap::new(),
+        include_files: HashMap::new(),
     };
 
     langserver.command_provider = Some(commands::CustomCommandProvider::new(vec![
@@ -206,6 +210,8 @@ pub struct MinecraftShaderLanguageServer {
     tree_sitter: Rc<RefCell<Parser>>,
     log_guard: Option<slog_scope::GlobalLoggerGuard>,
     file_extensions: HashSet<OsString>,
+    shader_files: HashMap<PathBuf, shaders::ShaderFile>,
+    include_files: HashMap<PathBuf, shaders::IncludeFile>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -245,6 +251,46 @@ impl MinecraftShaderLanguageServer {
             code: 1,
             message: msg,
             data,
+        }
+    }
+
+    fn find_work_space(&self, curr_path: &PathBuf) -> HashSet<PathBuf> {
+        let mut work_spaces: HashSet<PathBuf> = HashSet::new();
+        for file in curr_path.read_dir().expect("read directory failed") {
+            if let Ok(file) = file {
+                let file_path = file.path();
+                if file_path.is_dir() {
+                    let file_name = file_path.file_name().unwrap();
+                    if file_name == "shaders" {
+                        info!("find work space {}", &file_path.to_str().unwrap());
+                        work_spaces.insert(file_path);
+                    }
+                    else {
+                        work_spaces.extend(self.find_work_space(&file_path));
+                    }
+                }
+            }
+        }
+        work_spaces
+    }
+
+    fn build_file_framework(&mut self) {
+        info!("generating file framework on current root"; "root" => self.root.to_str().unwrap());
+
+        let work_spaces: HashSet<PathBuf> = self.find_work_space(&self.root);
+        for work_space in &work_spaces {
+            for file in work_space.read_dir().expect("read directory failed") {
+                if let Ok(file) = file {
+                    let file_path = file.path();
+                    if file_path.is_file() {
+                        if TOPLEVEL_FILES.contains(file_path.file_name().unwrap().to_str().unwrap()) {
+                            let mut shader_file = shaders::ShaderFile::new(work_space, &file_path);
+                            shader_file.read_file(&mut self.include_files);
+                            self.shader_files.insert(file_path.clone(), shader_file);
+                        }
+                    }
+                }
+            }
         }
     }
 

@@ -45,6 +45,8 @@ pub fn new_temp_server(opengl_context: Option<Box<dyn opengl::ShaderValidator>>)
         log_guard: None,
         tree_sitter: Rc::new(RefCell::new(Parser::new())),
         file_extensions: HashSet::new(),
+        shader_files: HashMap::new(),
+        include_files: HashMap::new(),
     }
 }
 
@@ -279,4 +281,107 @@ fn test_05_initialize() {
         let contains = pairs.contains(&(first.clone(), second.clone()));
         assert!(contains, "doesn't contain ({:?}, {:?})", first, second);
     }
+}
+
+#[allow(deprecated)]
+#[test]
+#[logging_macro::log_scope]
+fn test07_rewrited_file_system() {
+    let mut server = new_temp_server(None);
+
+    let (_tmp_dir, tmp_path) = copy_to_tmp_dir("./testdata/05");
+
+    let initialize_params = InitializeParams {
+        process_id: None,
+        root_path: None,
+        root_uri: Some(Url::from_directory_path(tmp_path.clone()).unwrap()),
+        client_info: None,
+        initialization_options: None,
+        capabilities: ClientCapabilities {
+            workspace: None,
+            text_document: None,
+            experimental: None,
+            window: None,
+            general: Option::None,
+        },
+        trace: None,
+        workspace_folders: None,
+        locale: Option::None,
+    };
+
+    let on_response = |resp: Option<Response>| {
+        assert!(resp.is_some());
+        let respu = resp.unwrap();
+        match respu.result_or_error {
+            ResponseResult::Result(_) => {}
+            ResponseResult::Error(e) => {
+                panic!("expected ResponseResult::Result(..), got {:?}", e)
+            }
+        }
+    };
+
+    let completable = MethodCompletable::new(ResponseCompletable::new(Some(Id::Number(1)), Box::new(on_response)));
+    server.initialize(initialize_params, completable);
+    server.endpoint.request_shutdown();
+
+    server.build_file_framework();
+    
+    info!("detected {} shader files", server.shader_files.len());
+
+    let mut shader_files: String = String::from("shader files are");
+    for file in &server.shader_files {
+        shader_files += "\n\t";
+        shader_files += &String::from(file.0.to_str().unwrap());
+        shader_files += "\n\t\tincludes :";
+        let include_lines = file.1.including_line();
+        let include_files = file.1.including_file();
+        for ele in include_lines {
+            shader_files += "\n\t\t\t";
+            let index = ele.0;
+            let line = ele.1;
+            let include_file = include_files.get(index).unwrap();
+            shader_files += "index: ";
+            shader_files += &index.to_string();
+            shader_files += "\t line: ";
+            shader_files += &line.to_string();
+            shader_files += "\t path: ";
+            shader_files += &String::from(include_file.to_str().unwrap());
+        }
+    }
+    info!("{}", &shader_files);
+
+    info!("detected {} include files", server.include_files.len());
+
+    let mut include_files: String = String::from("include files are");
+    for file in &server.include_files {
+        include_files += "\n\t";
+        include_files += &String::from(file.0.to_str().unwrap());
+        include_files += "\n\t\trelated to :";
+        let parents = file.1.included_file().clone();
+        for ele in parents {
+            include_files += "\n\t\t\t";
+            include_files += &String::from(ele.to_str().unwrap());
+        }
+        include_files += "\n\t\tsub files :";
+        let sub_lines = file.1.including_line();
+        let sub_files = file.1.including_file();
+        for ele in sub_lines {
+            include_files += "\n\t\t\t";
+            let index = ele.0;
+            let line = ele.1;
+            let include_file = sub_files.get(index).unwrap();
+            include_files += "index: ";
+            include_files += &index.to_string();
+            include_files += "\t line: ";
+            include_files += &line.to_string();
+            include_files += "\t path: ";
+            include_files += &String::from(include_file.to_str().unwrap());
+        }
+    }
+    info!("{}", &include_files);
+
+    // for shader in server.shader_files {
+    //     info!("{}", shader.0.to_str().unwrap());
+    // }
+
 }

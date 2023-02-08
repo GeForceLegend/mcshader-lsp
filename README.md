@@ -12,7 +12,7 @@ Currently supported editors:
 
 - [Visual Studio Code](https://code.visualstudio.com/) with `vscode-mc-shader`
 
-<img src="https://github.com/Strum355/mcshader-lsp/raw/rust-rewrite/logo.png" width="20%" height="20%">
+![img](https://github.com/GeForceLegend/mcshader-lsp/raw/file-system-rewrite/logo.png)
 
 ## Features
 
