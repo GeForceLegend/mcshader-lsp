@@ -323,8 +323,6 @@ fn test07_rewrited_file_system() {
     let completable = MethodCompletable::new(ResponseCompletable::new(Some(Id::Number(1)), Box::new(on_response)));
     server.initialize(initialize_params, completable);
     server.endpoint.request_shutdown();
-
-    server.build_file_framework();
     
     info!("detected {} shader files", server.shader_files.len());
 

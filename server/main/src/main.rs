@@ -295,7 +295,7 @@ impl MinecraftShaderLanguageServer {
                         self.add_shader_file(work_space, &file_path);
                     }
                     else if file_path.is_dir() && RE_DIMENSION_FOLDER.is_match(file_path.file_name().unwrap().to_str().unwrap()) {
-                        for dim_file in file_path.read_dir().expect("read world folder failed") {
+                        for dim_file in file_path.read_dir().expect("read dimension folder failed") {
                             if let Ok(dim_file) = dim_file {
                                 let file_path = dim_file.path();
                                 if file_path.is_file() {

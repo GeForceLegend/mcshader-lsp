@@ -11,7 +11,7 @@ use lazy_static::lazy_static;
 use slog_scope::info;
 
 lazy_static! {
-    static ref MACRO_INCLUDE: Regex = Regex::new(r#"^(?:\s)*?(?:#include) "(.+)"\r?"#).unwrap();
+    static ref RE_MACRO_INCLUDE: Regex = Regex::new(r#"^(?:\s)*?(?:#include) "(.+)"\r?"#).unwrap();
 }
 
 pub struct ShaderFile {
@@ -34,9 +34,9 @@ impl ShaderFile {
                 Ok(t) => Some((line.0, t)),
                 Err(_e) => None,
             })
-            .filter(|line| MACRO_INCLUDE.is_match(line.1.as_str()))
+            .filter(|line| RE_MACRO_INCLUDE.is_match(line.1.as_str()))
             .for_each(|line| {
-                let cap = MACRO_INCLUDE.captures(line.1.as_str()).unwrap().get(1).unwrap();
+                let cap = RE_MACRO_INCLUDE.captures(line.1.as_str()).unwrap().get(1).unwrap();
                 let path: String = cap.as_str().into();
 
                 let include_path = if path.starts_with('/') {
@@ -78,6 +78,20 @@ impl IncludeFile {
         &self.including_file
     }
 
+    pub fn update_parent(&mut self, parent_file: &PathBuf, include_files: &mut HashMap<PathBuf, IncludeFile>, depth: i32) {
+        if depth > 10 {
+            return;
+        }
+
+        self.included_file.insert(parent_file.clone());
+        
+        for file in &self.including_file {
+            let mut sub_include_file = include_files.remove(&file.1).unwrap();
+            sub_include_file.update_parent(parent_file, include_files, depth + 1);
+            include_files.insert(file.1.clone(), sub_include_file);
+        }
+    }
+
     pub fn get_includes(work_space: &PathBuf, include_path: &PathBuf, parent_file: &PathBuf, include_files: &mut HashMap<PathBuf, IncludeFile>, depth: i32) {
         if depth > 10 {
             return;
@@ -85,6 +99,11 @@ impl IncludeFile {
         if include_files.contains_key(include_path) {
             let mut include = include_files.remove(include_path).unwrap();
             include.included_file.insert(parent_file.clone());
+            for file in &include.including_file {
+                let mut sub_include_file = include_files.remove(&file.1).unwrap();
+                sub_include_file.update_parent(parent_file, include_files, depth + 1);
+                include_files.insert(file.1.clone(), sub_include_file);
+            }
             include_files.insert(include_path.clone(), include);
         }
         else {
@@ -105,9 +124,9 @@ impl IncludeFile {
                     Ok(t) => Some((line.0, t)),
                     Err(_e) => None,
                 })
-                .filter(|line| MACRO_INCLUDE.is_match(line.1.as_str()))
+                .filter(|line| RE_MACRO_INCLUDE.is_match(line.1.as_str()))
                 .for_each(|line| {
-                    let cap = MACRO_INCLUDE.captures(line.1.as_str()).unwrap().get(1).unwrap();
+                    let cap = RE_MACRO_INCLUDE.captures(line.1.as_str()).unwrap().get(1).unwrap();
                     let path: String = cap.as_str().into();
 
                     let sub_include_path = if path.starts_with('/') {
