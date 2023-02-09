@@ -309,11 +309,29 @@ impl MinecraftShaderLanguageServer {
         }
     }
 
-    fn clean_file_framework(&mut self) {
-        info!("cleaning file framework...");
+    fn clear_file_framework(&mut self) {
+        info!("clearing file framework...");
 
         self.shader_files.clear();
         self.include_files.clear();
+    }
+
+    fn update_file(&mut self, path: &PathBuf) {
+        if self.shader_files.contains_key(path) {
+            let mut shader_file = self.shader_files.remove(path).unwrap();
+            shader_file.clear_including_files();
+            shader_file.read_file(&mut self.include_files);
+            self.shader_files.insert(path.clone(), shader_file);
+        }
+        if self.include_files.contains_key(path) {
+            let mut include_file = self.include_files.remove(path).unwrap();
+            include_file.update_include(&mut self.include_files);
+            self.include_files.insert(path.clone(), include_file);
+        }
+    }
+
+    fn lint_shader(&self) {
+        ;
     }
 
     fn build_initial_graph(&self) {
@@ -775,7 +793,7 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
                 self.graph = Rc::new(RefCell::new(graph::CachedStableGraph::new()));
                 self.build_initial_graph();
 
-                self.clean_file_framework();
+                self.clear_file_framework();
                 self.build_file_framework();
 
                 self.set_status("ready", "Project reinitialized", "$(check)");
@@ -817,6 +835,7 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
                 return;
             }
             self.update_includes(&path);
+            self.update_file(&path);
 
             match self.lint(&path) {
                 Ok(diagnostics) => self.publish_diagnostic(diagnostics, None),
