@@ -74,6 +74,7 @@ pub fn is_top_level(path: &Path) -> bool {
 lazy_static! {
     static ref RE_INCLUDE: Regex = Regex::new(r#"^(?:\s)*?(?:#include) "(.+)"\r?"#).unwrap();
     static ref RE_WORLD_FOLDER: Regex = Regex::new(r#"^shaders(/world-?\d+)?"#).unwrap();
+    static ref RE_DIMENSION_FOLDER: Regex = Regex::new(r#"^world-?\d+"#).unwrap();
     static ref TOPLEVEL_FILES: HashSet<String> = {
         let mut set = HashSet::with_capacity(1716);
         for ext in ["fsh", "vsh", "gsh", "csh"] {
@@ -274,24 +275,45 @@ impl MinecraftShaderLanguageServer {
         work_spaces
     }
 
+    fn add_shader_file(&mut self, work_space: &PathBuf, file_path: &PathBuf) {
+        if TOPLEVEL_FILES.contains(file_path.file_name().unwrap().to_str().unwrap()) {
+            let mut shader_file = shaders::ShaderFile::new(work_space, &file_path);
+            shader_file.read_file(&mut self.include_files);
+            self.shader_files.insert(file_path.clone(), shader_file);
+        }
+    }
+
     fn build_file_framework(&mut self) {
         info!("generating file framework on current root"; "root" => self.root.to_str().unwrap());
 
         let work_spaces: HashSet<PathBuf> = self.find_work_space(&self.root);
         for work_space in &work_spaces {
-            for file in work_space.read_dir().expect("read directory failed") {
+            for file in work_space.read_dir().expect("read work space failed") {
                 if let Ok(file) = file {
                     let file_path = file.path();
                     if file_path.is_file() {
-                        if TOPLEVEL_FILES.contains(file_path.file_name().unwrap().to_str().unwrap()) {
-                            let mut shader_file = shaders::ShaderFile::new(work_space, &file_path);
-                            shader_file.read_file(&mut self.include_files);
-                            self.shader_files.insert(file_path.clone(), shader_file);
+                        self.add_shader_file(work_space, &file_path);
+                    }
+                    else if file_path.is_dir() && RE_DIMENSION_FOLDER.is_match(file_path.file_name().unwrap().to_str().unwrap()) {
+                        for dim_file in file_path.read_dir().expect("read world folder failed") {
+                            if let Ok(dim_file) = dim_file {
+                                let file_path = dim_file.path();
+                                if file_path.is_file() {
+                                    self.add_shader_file(work_space, &file_path);
+                                }
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    fn clean_file_framework(&mut self) {
+        info!("cleaning file framework...");
+
+        self.shader_files.clear();
+        self.include_files.clear();
     }
 
     fn build_initial_graph(&self) {
@@ -709,6 +731,7 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
 
 
             self.build_initial_graph();
+            self.build_file_framework();
 
             self.set_status("ready", "Project initialized", "$(check)");
         });
@@ -751,6 +774,9 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
 
                 self.graph = Rc::new(RefCell::new(graph::CachedStableGraph::new()));
                 self.build_initial_graph();
+
+                self.clean_file_framework();
+                self.build_file_framework();
 
                 self.set_status("ready", "Project reinitialized", "$(check)");
 

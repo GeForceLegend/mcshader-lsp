@@ -333,19 +333,19 @@ fn test07_rewrited_file_system() {
         shader_files += "\n\t";
         shader_files += &String::from(file.0.to_str().unwrap());
         shader_files += "\n\t\tincludes :";
-        let include_lines = file.1.including_line();
         let include_files = file.1.including_file();
-        for ele in include_lines {
+        let mut index = 0;
+        for ele in include_files {
             shader_files += "\n\t\t\t";
-            let index = ele.0;
-            let line = ele.1;
-            let include_file = include_files.get(index).unwrap();
+            let line = ele.0;
+            let include_file = &ele.1;
             shader_files += "index: ";
             shader_files += &index.to_string();
             shader_files += "\t line: ";
             shader_files += &line.to_string();
             shader_files += "\t path: ";
             shader_files += &String::from(include_file.to_str().unwrap());
+            index += 1;
         }
     }
     info!("{}", &shader_files);
@@ -363,19 +363,19 @@ fn test07_rewrited_file_system() {
             include_files += &String::from(ele.to_str().unwrap());
         }
         include_files += "\n\t\tsub files :";
-        let sub_lines = file.1.including_line();
+        let mut index = 0;
         let sub_files = file.1.including_file();
-        for ele in sub_lines {
+        for ele in sub_files {
             include_files += "\n\t\t\t";
-            let index = ele.0;
-            let line = ele.1;
-            let include_file = sub_files.get(index).unwrap();
+            let line = ele.0;
+            let include_file = &ele.1;
             include_files += "index: ";
             include_files += &index.to_string();
             include_files += "\t line: ";
             include_files += &line.to_string();
             include_files += "\t path: ";
             include_files += &String::from(include_file.to_str().unwrap());
+            index += 1;
         }
     }
     info!("{}", &include_files);

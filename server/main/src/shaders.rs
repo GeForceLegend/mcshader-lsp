@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, LinkedList},
     path::{PathBuf},
     io::{BufReader, BufRead},
 };
@@ -17,16 +17,11 @@ lazy_static! {
 pub struct ShaderFile {
     path: PathBuf,
     work_space: PathBuf,
-    including_line: HashMap<usize, usize>,
-    including_file: HashMap<usize, PathBuf>,
+    including_file: LinkedList<(usize, PathBuf)>,
 }
 
 impl ShaderFile {
-    pub fn including_line(&self) -> &HashMap<usize, usize> {
-        &self.including_line
-    }
-
-    pub fn including_file(&self) -> &HashMap<usize, PathBuf> {
+    pub fn including_file(&self) -> &LinkedList<(usize, PathBuf)> {
         &self.including_file
     }
 
@@ -51,9 +46,7 @@ impl ShaderFile {
                     shader_path.parent().unwrap().join(PathBuf::from_slash(&path))
                 };
 
-                let includes = self.including_file.len();
-                self.including_line.insert(includes, line.0);
-                self.including_file.insert(includes, include_path.clone());
+                self.including_file.push_back((line.0, include_path.clone()));
 
                 IncludeFile::get_includes(&self.work_space, &include_path, &self.path, include_files, 0);
             });
@@ -63,8 +56,7 @@ impl ShaderFile {
         ShaderFile {
             path: path.clone(),
             work_space: work_space.clone(),
-            including_line: HashMap::new(),
-            including_file: HashMap::new(),
+            including_file: LinkedList::new(),
         }
     }
 }
@@ -74,8 +66,7 @@ pub struct IncludeFile {
     path: PathBuf,
     work_space: PathBuf,
     included_file: HashSet<PathBuf>,
-    including_line: HashMap<usize, usize>,
-    including_file: HashMap<usize, PathBuf>,
+    including_file: LinkedList<(usize, PathBuf)>,
 }
 
 impl IncludeFile {
@@ -83,11 +74,7 @@ impl IncludeFile {
         &self.included_file
     }
 
-    pub fn including_line(&self) -> &HashMap<usize, usize> {
-        &self.including_line
-    }
-
-    pub fn including_file(&self) -> &HashMap<usize, PathBuf> {
+    pub fn including_file(&self) -> &LinkedList<(usize, PathBuf)> {
         &self.including_file
     }
 
@@ -105,8 +92,7 @@ impl IncludeFile {
                 path: include_path.clone(),
                 work_space: work_space.clone(),
                 included_file: HashSet::new(),
-                including_line: HashMap::new(),
-                including_file: HashMap::new(),
+                including_file: LinkedList::new(),
             };
             include.included_file.insert(parent_file.clone());
 
@@ -131,9 +117,7 @@ impl IncludeFile {
                         include_path.parent().unwrap().join(PathBuf::from_slash(&path))
                     };
 
-                    let includes = include.including_file.len();
-                    include.including_line.insert(includes, line.0);
-                    include.including_file.insert(includes, sub_include_path.clone());
+                    include.including_file.push_back((line.0, sub_include_path.clone()));
 
                     Self::get_includes(work_space, &sub_include_path, parent_file, include_files, depth + 1);
                 });
