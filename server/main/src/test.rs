@@ -331,7 +331,7 @@ fn test07_rewrited_file_system() {
         shader_files += "\n\t";
         shader_files += &String::from(file.0.to_str().unwrap());
         shader_files += "\n\t\tincludes :";
-        let include_files = file.1.including_file();
+        let include_files = file.1.including_files();
         let mut index = 0;
         for ele in include_files {
             shader_files += "\n\t\t\t";
@@ -355,14 +355,14 @@ fn test07_rewrited_file_system() {
         include_files += "\n\t";
         include_files += &String::from(file.0.to_str().unwrap());
         include_files += "\n\t\trelated to :";
-        let parents = file.1.included_file().clone();
+        let parents = file.1.included_shaders().clone();
         for ele in parents {
             include_files += "\n\t\t\t";
             include_files += &String::from(ele.to_str().unwrap());
         }
         include_files += "\n\t\tsub files :";
         let mut index = 0;
-        let sub_files = file.1.including_file();
+        let sub_files = file.1.including_files();
         for ele in sub_files {
             include_files += "\n\t\t\t";
             let line = ele.0;
