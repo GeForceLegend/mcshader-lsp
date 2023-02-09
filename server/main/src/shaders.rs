@@ -70,6 +70,44 @@ impl ShaderFile {
                 IncludeFile::get_includes(&self.work_space, &include_path, &parent_path, include_files, 0);
             });
     }
+
+    pub fn merge_shader_file(&self, include_files: &HashMap<PathBuf, IncludeFile>, file_list: &mut HashMap<i32, PathBuf>) -> String {
+        let mut shader_content: String = String::new();
+        file_list.insert(0, self.path.clone());
+
+        let mut including_files = self.including_files.clone();
+        let mut next_include_file = match including_files.pop_front() {
+            Some(include_file) => include_file,
+            None => (usize::from(u16::MAX), PathBuf::from("/")),
+        };
+        let mut file_id = 0;
+
+        let shader_reader = BufReader::new(std::fs::File::open(self.path.clone()).unwrap());
+        shader_reader.lines()
+            .enumerate()
+            .filter_map(|line| match line.1 {
+                Ok(t) => Some((line.0, t)),
+                Err(_e) => None,
+            })
+            .for_each(|line| {
+                if line.0 == next_include_file.0 {
+                    let include_file = include_files.get(&next_include_file.1).unwrap();
+                    file_id += 1;
+                    let include_content = include_file.merge_include(&line.1, include_files, file_list, &mut file_id);
+                    shader_content += &include_content;
+                    next_include_file = match including_files.pop_front() {
+                        Some(include_file) => include_file,
+                        None => (usize::from(u16::MAX), PathBuf::from("/")),
+                    };
+                    shader_content += &format!("#line {} 0\n", line.0 + 2);
+                }
+                else {
+                    shader_content += &line.1;
+                    shader_content += "\n";
+                }
+            });
+        shader_content
+    }
 }
 
 #[derive(Clone)]
@@ -186,5 +224,49 @@ impl IncludeFile {
 
                 Self::get_includes(&self.work_space, &sub_include_path, &self.included_shaders, include_files, 1);
             });
+    }
+
+    pub fn merge_include(&self, original_content: &String, include_files: &HashMap<PathBuf, IncludeFile>, file_list: &mut HashMap<i32, PathBuf>, file_id: &mut i32) -> String {
+        if (!self.path.exists()) {
+            original_content.clone() + "\n"
+        }
+        else {
+            let mut include_content: String = String::new();
+            file_list.insert(file_id.clone(), self.path.clone());
+            include_content += &format!("#line 1 {}\n", &file_id.to_string());
+
+            let curr_file_id = file_id.clone();
+            let mut including_files = self.including_files.clone();
+            let mut next_include_file = match including_files.pop_front() {
+                Some(include_file) => include_file,
+                None => (usize::from(u16::MAX), PathBuf::from("/")),
+            };
+
+            let shader_reader = BufReader::new(std::fs::File::open(self.path.clone()).unwrap());
+            shader_reader.lines()
+                .enumerate()
+                .filter_map(|line| match line.1 {
+                    Ok(t) => Some((line.0, t)),
+                    Err(_e) => None,
+                })
+                .for_each(|line| {
+                    if line.0 == next_include_file.0 {
+                        let include_file = include_files.get(&next_include_file.1).unwrap();
+                        *file_id += 1;
+                        let sub_include_content = include_file.merge_include(&line.1, include_files, file_list, file_id);
+                        include_content += &sub_include_content;
+                        next_include_file = match including_files.pop_front() {
+                            Some(include_file) => include_file,
+                            None => (usize::from(u16::MAX), PathBuf::from("/")),
+                        };
+                        include_content += &format!("#line {} {}\n", line.0 + 2, curr_file_id);
+                    }
+                    else {
+                        include_content += &line.1;
+                        include_content += "\n";
+                    }
+                });
+            include_content
+        }
     }
 }

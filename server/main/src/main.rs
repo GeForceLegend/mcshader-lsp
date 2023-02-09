@@ -330,8 +330,11 @@ impl MinecraftShaderLanguageServer {
         }
     }
 
-    fn lint_shader(&self) {
-        ;
+    fn lint_shader(&self, path: &PathBuf) {
+        let shader_file = self.shader_files.get(path).unwrap();
+
+        let mut file_list: HashMap<i32, PathBuf> = HashMap::new();
+        let shader_content = shader_file.merge_shader_file(&self.include_files, &mut file_list);
     }
 
     fn build_initial_graph(&self) {

@@ -326,57 +326,66 @@ fn test07_rewrited_file_system() {
     
     info!("detected {} shader files", server.shader_files.len());
 
-    let mut shader_files: String = String::from("shader files are");
+    // let mut shader_files: String = String::from("shader files are");
     for file in &server.shader_files {
-        shader_files += "\n\t";
-        shader_files += &String::from(file.0.to_str().unwrap());
-        shader_files += "\n\t\tincludes :";
-        let include_files = file.1.including_files();
-        let mut index = 0;
-        for ele in include_files {
-            shader_files += "\n\t\t\t";
-            let line = ele.0;
-            let include_file = &ele.1;
-            shader_files += "index: ";
-            shader_files += &index.to_string();
-            shader_files += "\t line: ";
-            shader_files += &line.to_string();
-            shader_files += "\t path: ";
-            shader_files += &String::from(include_file.to_str().unwrap());
-            index += 1;
-        }
-    }
-    info!("{}", &shader_files);
 
-    info!("detected {} include files", server.include_files.len());
+        let mut file_list: HashMap<i32, PathBuf> = HashMap::new();
+        let shader_content = file.1.merge_shader_file(&server.include_files, &mut file_list);
+        info!("{}", shader_content);
 
-    let mut include_files: String = String::from("include files are");
-    for file in &server.include_files {
-        include_files += "\n\t";
-        include_files += &String::from(file.0.to_str().unwrap());
-        include_files += "\n\t\trelated to :";
-        let parents = file.1.included_shaders().clone();
-        for ele in parents {
-            include_files += "\n\t\t\t";
-            include_files += &String::from(ele.to_str().unwrap());
+        for include_file in file_list {
+            info!("{} {}", include_file.0, include_file.1.to_str().unwrap());
         }
-        include_files += "\n\t\tsub files :";
-        let mut index = 0;
-        let sub_files = file.1.including_files();
-        for ele in sub_files {
-            include_files += "\n\t\t\t";
-            let line = ele.0;
-            let include_file = &ele.1;
-            include_files += "index: ";
-            include_files += &index.to_string();
-            include_files += "\t line: ";
-            include_files += &line.to_string();
-            include_files += "\t path: ";
-            include_files += &String::from(include_file.to_str().unwrap());
-            index += 1;
-        }
+
+        // shader_files += "\n\t";
+        // shader_files += &String::from(file.0.to_str().unwrap());
+        // shader_files += "\n\t\tincludes :";
+        // let include_files = file.1.including_files();
+        // let mut index = 0;
+        // for ele in include_files {
+        //     shader_files += "\n\t\t\t";
+        //     let line = ele.0;
+        //     let include_file = &ele.1;
+        //     shader_files += "index: ";
+        //     shader_files += &index.to_string();
+        //     shader_files += "\t line: ";
+        //     shader_files += &line.to_string();
+        //     shader_files += "\t path: ";
+        //     shader_files += &String::from(include_file.to_str().unwrap());
+        //     index += 1;
+        // }
     }
-    info!("{}", &include_files);
+    // info!("{}", &shader_files);
+
+    // info!("detected {} include files", server.include_files.len());
+
+    // let mut include_files: String = String::from("include files are");
+    // for file in &server.include_files {
+    //     include_files += "\n\t";
+    //     include_files += &String::from(file.0.to_str().unwrap());
+    //     include_files += "\n\t\trelated to :";
+    //     let parents = file.1.included_shaders().clone();
+    //     for ele in parents {
+    //         include_files += "\n\t\t\t";
+    //         include_files += &String::from(ele.to_str().unwrap());
+    //     }
+    //     include_files += "\n\t\tsub files :";
+    //     let mut index = 0;
+    //     let sub_files = file.1.including_files();
+    //     for ele in sub_files {
+    //         include_files += "\n\t\t\t";
+    //         let line = ele.0;
+    //         let include_file = &ele.1;
+    //         include_files += "index: ";
+    //         include_files += &index.to_string();
+    //         include_files += "\t line: ";
+    //         include_files += &line.to_string();
+    //         include_files += "\t path: ";
+    //         include_files += &String::from(include_file.to_str().unwrap());
+    //         index += 1;
+    //     }
+    // }
+    // info!("{}", &include_files);
 
     // for shader in server.shader_files {
     //     info!("{}", shader.0.to_str().unwrap());
