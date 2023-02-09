@@ -93,7 +93,7 @@ impl ShaderFile {
                 if line.0 == next_include_file.0 {
                     let include_file = include_files.get(&next_include_file.1).unwrap();
                     file_id += 1;
-                    let include_content = include_file.merge_include(&line.1, include_files, file_list, &mut file_id);
+                    let include_content = include_file.merge_include(&line.1, include_files, file_list, &mut file_id, 1);
                     shader_content += &include_content;
                     next_include_file = match including_files.pop_front() {
                         Some(include_file) => include_file,
@@ -226,8 +226,8 @@ impl IncludeFile {
             });
     }
 
-    pub fn merge_include(&self, original_content: &String, include_files: &HashMap<PathBuf, IncludeFile>, file_list: &mut HashMap<i32, PathBuf>, file_id: &mut i32) -> String {
-        if (!self.path.exists()) {
+    pub fn merge_include(&self, original_content: &String, include_files: &HashMap<PathBuf, IncludeFile>, file_list: &mut HashMap<i32, PathBuf>, file_id: &mut i32, depth: i32) -> String {
+        if !self.path.exists() || depth > 10 {
             original_content.clone() + "\n"
         }
         else {
@@ -253,7 +253,7 @@ impl IncludeFile {
                     if line.0 == next_include_file.0 {
                         let include_file = include_files.get(&next_include_file.1).unwrap();
                         *file_id += 1;
-                        let sub_include_content = include_file.merge_include(&line.1, include_files, file_list, file_id);
+                        let sub_include_content = include_file.merge_include(&line.1, include_files, file_list, file_id, depth + 1);
                         include_content += &sub_include_content;
                         next_include_file = match including_files.pop_front() {
                             Some(include_file) => include_file,
