@@ -309,6 +309,7 @@ impl MinecraftShaderLanguageServer {
     }
 
     fn update_lint(&mut self, path: &PathBuf) {
+        self.set_status("loading", "Compiling shaders...", "$(loading~spin)");
         let mut diagnostics: HashMap<Url, Vec<Diagnostic>> = HashMap::new();
         if self.shader_files.contains_key(path) {
             diagnostics.extend(self.lint_shader(path));
@@ -323,6 +324,7 @@ impl MinecraftShaderLanguageServer {
             }
         }
         self.publish_diagnostic(diagnostics, None);
+        self.set_status("ready", "Compiled all changed files", "$(check)");
     }
 
     pub fn publish_diagnostic(&self, diagnostics: HashMap<Url, Vec<Diagnostic>>, document_version: Option<i32>) {
@@ -472,11 +474,14 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
         logging::slog_with_trace_id(|| {
             for change in params.changes {
                 let path = PathBuf::from_url(change.uri);
-                if change.typ != FileChangeType::DELETED {
-                    continue;
+                if change.typ == FileChangeType::DELETED {
+                    if self.shader_files.contains_key(&path) {
+                        self.remove_shader_file(&path);
+                    }
                 }
-                if self.shader_files.contains_key(&path) {
-                    self.remove_shader_file(&path);
+                else if self.shader_files.contains_key(&path) || self.include_files.contains_key(&path) {
+                    self.update_file(&path);
+                    self.update_lint(&path); 
                 }
             }
         })
