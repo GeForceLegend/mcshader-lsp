@@ -10,8 +10,46 @@ use regex::Regex;
 use lazy_static::lazy_static;
 use slog_scope::{error};
 
+const OPTIFINE_MACROS: &str = "#define MC_VERSION 11900
+#define MC_GL_VERSION 320
+#define MC_GLSL_VERSION 150
+#define MC_OS_WINDOWS
+#define MC_GL_VENDOR_NVIDIA
+#define MC_GL_RENDERER_GEFORCE
+#define MC_NORMAL_MAP
+#define MC_SPECULAR_MAP
+#define MC_RENDER_QUALITY 1.0
+#define MC_SHADOW_QUALITY 1.0
+#define MC_HAND_DEPTH 0.125
+#define MC_RENDER_STAGE_NONE 0
+#define MC_RENDER_STAGE_SKY 1
+#define MC_RENDER_STAGE_SUNSET 2
+#define MC_RENDER_STAGE_SUN 4
+#define MC_RENDER_STAGE_CUSTOM_SKY 3
+#define MC_RENDER_STAGE_MOON 5
+#define MC_RENDER_STAGE_STARS 6
+#define MC_RENDER_STAGE_VOID 7
+#define MC_RENDER_STAGE_TERRAIN_SOLID 8
+#define MC_RENDER_STAGE_TERRAIN_CUTOUT_MIPPED 9
+#define MC_RENDER_STAGE_TERRAIN_CUTOUT 10
+#define MC_RENDER_STAGE_ENTITIES 11
+#define MC_RENDER_STAGE_BLOCK_ENTITIES 12
+#define MC_RENDER_STAGE_DESTROY 13
+#define MC_RENDER_STAGE_OUTLINE 14
+#define MC_RENDER_STAGE_DEBUG 15
+#define MC_RENDER_STAGE_HAND_SOLID 16
+#define MC_RENDER_STAGE_TERRAIN_TRANSLUCENT 17
+#define MC_RENDER_STAGE_TRIPWIRE 18
+#define MC_RENDER_STAGE_PARTICLES 19
+#define MC_RENDER_STAGE_CLOUDS 20
+#define MC_RENDER_STAGE_RAIN_SNOW 21
+#define MC_RENDER_STAGE_WORLD_BORDER 22
+#define MC_RENDER_STAGE_HAND_TRANSLUCENT 23
+";
+
 lazy_static! {
     static ref RE_MACRO_INCLUDE: Regex = Regex::new(r#"^(?:\s)*?(?:#include) "(.+)"\r?"#).unwrap();
+    static ref RE_MACRO_VERSION: Regex = Regex::new(r#"^(?:\s)*?(?:#version) \r?"#).unwrap();
 }
 
 pub struct ShaderFile {
@@ -101,6 +139,7 @@ impl ShaderFile {
         let mut including_files = self.including_files.clone();
         let mut next_include_file = IncludeFile::next_include_file(&mut including_files);
         let mut file_id = 0;
+        let mut inserted_macro = self.work_space.parent().unwrap().file_name().unwrap() == "debug";
 
         let shader_reader = BufReader::new(std::fs::File::open(self.path.clone()).unwrap());
         shader_reader.lines()
@@ -121,6 +160,11 @@ impl ShaderFile {
                 else {
                     shader_content += &line.1;
                     shader_content += "\n";
+                    if RE_MACRO_VERSION.is_match(line.1.as_str()) && !inserted_macro {
+                        shader_content += OPTIFINE_MACROS;
+                        shader_content += &format!("#line {} 0\n", line.0 + 2);
+                        inserted_macro = true;
+                    }
                 }
             });
         shader_content

@@ -71,7 +71,10 @@ impl DiagnosticsParser {
 
             let file_path = match diagnostic_capture.name("filepath") {
                 Some(index) => {
-                    file_list.get(index.as_str()).unwrap()
+                    match file_list.get(index.as_str()) {
+                        Some(file) => file,
+                        None => default_path,
+                    }
                 }
                 None => default_path,
             };
@@ -82,7 +85,7 @@ impl DiagnosticsParser {
                     /* Position::new(line, leading_whitespace as u64),
                     Position::new(line, line_text.len() as u64) */
                     Position::new(line, 0),
-                    Position::new(line, 1000),
+                    Position::new(line, u32::MAX),
                 ),
                 code: None,
                 severity: Some(severity),

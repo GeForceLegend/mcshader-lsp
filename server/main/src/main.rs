@@ -257,13 +257,6 @@ impl MinecraftShaderLanguageServer {
         }
     }
 
-    fn clear_file_framework(&mut self) {
-        info!("clearing file framework...");
-
-        self.shader_files.clear();
-        self.include_files.clear();
-    }
-
     fn update_file(&mut self, path: &PathBuf) {
         if self.shader_files.contains_key(path) {
             let mut shader_file = self.shader_files.remove(path).unwrap();
@@ -430,15 +423,6 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
                 let config: Configuration = from_value(settings.to_owned()).unwrap();
 
                 info!("got updated configuration"; "config" => params.settings.as_object().unwrap().get("mcglsl").unwrap().to_string());
-
-                // Rebuilt dependency graph to add files with new extensions to graph
-                info!("rebuilding dependency graph with changed configuration");
-                self.set_status("loading", "Rebuilding dependency graph...", "$(loading~spin)");
-
-                self.clear_file_framework();
-                self.build_file_framework();
-
-                self.set_status("ready", "Project reinitialized", "$(check)");
 
                 configuration::handle_log_level_change(config.log_level, |level| {
                     self.log_guard = None; // set to None so Drop is invoked
