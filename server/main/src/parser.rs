@@ -4,7 +4,12 @@ use std::{
 };
 
 use regex::Regex;
-use rust_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Range, Position};
+use rust_lsp::lsp_types::{
+    Diagnostic,
+    DiagnosticSeverity,
+    Range,
+    Position
+};
 use slog_scope::debug;
 use url::Url;
 

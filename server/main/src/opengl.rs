@@ -8,7 +8,6 @@ use mockall::automock;
 
 #[cfg_attr(test, automock)]
 pub trait ShaderValidator {
-    fn validate(&self, tree_type: super::TreeType, source: &str) -> Option<String>;
     fn validate_shader(&self, file_type: &gl::types::GLenum, source: &str) -> Option<String>;
     fn vendor(&self) -> String;
 }
@@ -72,33 +71,6 @@ impl OpenGlContext {
 }
 
 impl ShaderValidator for OpenGlContext {
-    fn validate(&self, tree_type: super::TreeType, source: &str) -> Option<String> {
-        unsafe {
-            match tree_type {
-                crate::TreeType::Fragment => {
-                    // Fragment shader
-                    let fragment_shader = gl::CreateShader(gl::FRAGMENT_SHADER);
-                    self.compile_and_get_shader_log(fragment_shader, source)
-                }
-                crate::TreeType::Vertex => {
-                    // Vertex shader
-                    let vertex_shader = gl::CreateShader(gl::VERTEX_SHADER);
-                    self.compile_and_get_shader_log(vertex_shader, source)
-                }
-                crate::TreeType::Geometry => {
-                    // Geometry shader
-                    let geometry_shader = gl::CreateShader(gl::GEOMETRY_SHADER);
-                    self.compile_and_get_shader_log(geometry_shader, source)
-                }
-                crate::TreeType::Compute => {
-                    // Compute shader
-                    let compute_shader = gl::CreateShader(gl::COMPUTE_SHADER);
-                    self.compile_and_get_shader_log(compute_shader, source)
-                }
-            }
-        }
-    }
-    
     fn validate_shader(&self, file_type: &gl::types::GLenum, source: &str) -> Option<String> {
         unsafe {
             let shader = gl::CreateShader(file_type.clone());

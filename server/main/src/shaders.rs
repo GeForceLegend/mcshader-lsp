@@ -26,11 +26,12 @@ pub struct ShaderFile {
 }
 
 impl ShaderFile {
-    pub fn including_files(&self) -> &LinkedList<(usize, usize, usize, PathBuf)> {
-        &self.including_files
-    }
     pub fn file_type(&self) -> &gl::types::GLenum {
         &self.file_type
+    }
+
+    pub fn including_files(&self) -> &LinkedList<(usize, usize, usize, PathBuf)> {
+        &self.including_files
     }
 
     pub fn clear_including_files(&mut self) {
@@ -141,6 +142,10 @@ pub struct IncludeFile {
 impl IncludeFile {
     pub fn included_shaders(&self) -> &HashSet<PathBuf> {
         &self.included_shaders
+    }
+
+    pub fn including_files(&self) -> &LinkedList<(usize, usize, usize, PathBuf)> {
+        &self.including_files
     }
 
     pub fn next_include_file(including_files: &mut LinkedList<(usize, usize, usize, PathBuf)>) -> (usize, usize, usize, PathBuf) {

@@ -138,15 +138,14 @@ const LIST_SYMBOLS_STR: &str = r#"
                  ])) @field_list)
 "#;
 
-pub struct ParserContext<'a> {
+pub struct ParserContext {
     source: String,
     tree: Tree,
     linemap: LineMap,
-    parser: &'a mut Parser,
 }
 
-impl<'a> ParserContext<'a> {
-    pub fn new(parser: &'a mut Parser, path: &Path) -> Result<Self> {
+impl ParserContext {
+    pub fn new(parser: &mut Parser, path: &Path) -> Result<Self> {
         let source = read_to_string(path)?;
 
         let tree = parser.parse(&source, None).unwrap();
@@ -157,7 +156,6 @@ impl<'a> ParserContext<'a> {
             source,
             tree,
             linemap,
-            parser,
         })
     }
 

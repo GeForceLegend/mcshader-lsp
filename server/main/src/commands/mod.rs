@@ -5,7 +5,6 @@ use serde_json::Value;
 use anyhow::{format_err, Result};
 use slog_scope::info;
 
-pub mod graph_dot;
 pub mod parse_tree;
 
 pub struct CustomCommandProvider {

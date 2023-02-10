@@ -13,7 +13,7 @@ use serde_json::{from_value, Value};
 use tree_sitter::Parser;
 use url_norm::FromUrl;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, LinkedList};
 use std::convert::TryFrom;
 use std::ffi::OsString;
 use std::fmt::{Debug, Display, Formatter};
@@ -38,18 +38,13 @@ use lazy_static::lazy_static;
 mod commands;
 mod configuration;
 mod consts;
-mod graph;
 mod linemap;
 mod lsp_ext;
 mod navigation;
 mod opengl;
 mod parser;
 mod shaders;
-mod source_mapper;
 mod url_norm;
-
-#[cfg(test)]
-mod test;
 
 pub fn is_top_level(path: &Path) -> bool {
     let path = path.to_slash().unwrap();
@@ -150,8 +145,6 @@ fn main() {
 
     let endpoint_output = LSPEndpoint::create_lsp_output_with_output_stream(stdout);
 
-    let cache_graph = graph::CachedStableGraph::new();
-
     let mut parser = Parser::new();
     parser.set_language(tree_sitter_glsl::language()).unwrap();
 
@@ -159,7 +152,6 @@ fn main() {
 
     let mut langserver = MinecraftShaderLanguageServer {
         endpoint: endpoint_output.clone(),
-        graph: Rc::new(RefCell::new(cache_graph)),
         root: "".into(),
         command_provider: None,
         opengl_context: opengl_context.clone(),
@@ -173,12 +165,6 @@ fn main() {
 
     langserver.command_provider = Some(commands::CustomCommandProvider::new(vec![
         (
-            "graphDot",
-            Box::new(commands::graph_dot::GraphDotCommand {
-                graph: langserver.graph.clone(),
-            }),
-        ),
-        (
             "parseTree",
             Box::new(commands::parse_tree::TreeSitterSExpr {
                 tree_sitter: langserver.tree_sitter.clone(),
@@ -191,7 +177,6 @@ fn main() {
 
 pub struct MinecraftShaderLanguageServer {
     endpoint: Endpoint,
-    graph: Rc<RefCell<graph::CachedStableGraph>>,
     root: PathBuf,
     command_provider: Option<commands::CustomCommandProvider>,
     opengl_context: Rc<dyn opengl::ShaderValidator>,
@@ -690,49 +675,37 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
         logging::slog_with_trace_id(|| {
             // node for current document
             let curr_doc = PathBuf::from_url(params.text_document.uri);
-            let node = match self.graph.borrow_mut().find_node(&curr_doc) {
-                Some(n) => n,
-                None => {
-                    warn!("document not found in graph"; "path" => curr_doc.to_str().unwrap());
-                    completable.complete(Ok(vec![]));
-                    return;
-                }
-            };
+            
+            let include_list: LinkedList<(usize, usize, usize, PathBuf)>;
+            if self.shader_files.contains_key(&curr_doc) {
+                include_list = self.shader_files.get(&curr_doc).unwrap().including_files().clone();
+            }
+            else if self.include_files.contains_key(&curr_doc) {
+                include_list = self.include_files.get(&curr_doc).unwrap().including_files().clone();
+            }
+            else {
+                warn!("document not found in file system"; "path" => curr_doc.to_str().unwrap());
+                completable.complete(Ok(vec![]));
+                return;
+            }
 
-            let edges: Vec<DocumentLink> = self
-                .graph
-                .borrow()
-                .child_node_indexes(node)
-                .filter_map::<Vec<DocumentLink>, _>(|child| {
-                    let graph = self.graph.borrow();
-                    graph.get_child_positions(node, child).map(|value| {
-                        let path = graph.get_node(child);
-                        let url = match Url::from_file_path(&path) {
-                            Ok(url) => url,
-                            Err(e) => {
-                                error!("error converting into url"; "path" => path.to_str().unwrap(), "error" => format!("{:?}", e));
-                                return None;
-                            }
-                        };
-    
-                        Some(DocumentLink {
-                            range: Range::new(
-                                Position::new(u32::try_from(value.line).unwrap(), u32::try_from(value.start).unwrap()),
-                                Position::new(u32::try_from(value.line).unwrap(), u32::try_from(value.end).unwrap()),
-                            ),
-                            target: Some(url.clone()),
-                            tooltip: Some(url.path().to_string()),
-                            data: None,
-                        })
-                    }).collect()
-                })
-                .flatten()
-                .collect();
-            debug!("document link results";
-                "links" => format!("{:?}", edges.iter().map(|e| (e.range, e.target.as_ref().unwrap().path())).collect::<Vec<_>>()),
-                "path" => curr_doc.to_str().unwrap(),
-            );
-            completable.complete(Ok(edges));
+            let mut include_links: Vec<DocumentLink> = Vec::new();
+            for include_file in include_list {
+                let path = include_file.3;
+                let url = Url::from_file_path(&path).unwrap();
+                include_links.push(
+                    DocumentLink {
+                        range: Range::new(
+                            Position::new(u32::try_from(include_file.0).unwrap(), u32::try_from(include_file.1).unwrap()),
+                            Position::new(u32::try_from(include_file.0).unwrap(), u32::try_from(include_file.2).unwrap()),
+                        ),
+                        target: Some(url.clone()),
+                        tooltip: Some(url.path().to_string()),
+                        data: None,
+                    }
+                )
+            }
+            completable.complete(Ok(include_links));
         });
     }
 
