@@ -15,7 +15,6 @@ use url_norm::FromUrl;
 
 use std::collections::{HashMap, HashSet, LinkedList};
 use std::convert::TryFrom;
-use std::ffi::OsString;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::{stdin, stdout};
 use std::iter::{Extend};
@@ -121,23 +120,6 @@ lazy_static! {
         }
         set
     };
-    static ref BASIC_FILE_EXTENSIONS: HashSet<OsString> = {
-        let mut set = HashSet::with_capacity(14);
-        set.insert(OsString::from("vsh"));
-        set.insert(OsString::from("gsh"));
-        set.insert(OsString::from("fsh"));
-        set.insert(OsString::from("csh"));
-        set.insert(OsString::from("vert"));
-        set.insert(OsString::from("geom"));
-        set.insert(OsString::from("frag"));
-        set.insert(OsString::from("comp"));
-        set.insert(OsString::from("vertex"));
-        set.insert(OsString::from("geometry"));
-        set.insert(OsString::from("fragment"));
-        set.insert(OsString::from("compute"));
-        set.insert(OsString::from("glsl"));
-        set
-    };
 }
 
 fn main() {
@@ -157,7 +139,6 @@ fn main() {
         opengl_context: opengl_context.clone(),
         tree_sitter: Rc::new(RefCell::new(parser)),
         log_guard: Some(guard),
-        file_extensions: BASIC_FILE_EXTENSIONS.clone(),
         shader_files: HashMap::new(),
         include_files: HashMap::new(),
         diagnostics_parser: parser::DiagnosticsParser::new(opengl_context.as_ref()),
@@ -182,7 +163,6 @@ pub struct MinecraftShaderLanguageServer {
     opengl_context: Rc<dyn opengl::ShaderValidator>,
     tree_sitter: Rc<RefCell<Parser>>,
     log_guard: Option<slog_scope::GlobalLoggerGuard>,
-    file_extensions: HashSet<OsString>,
     shader_files: HashMap<PathBuf, shaders::ShaderFile>,
     include_files: HashMap<PathBuf, shaders::IncludeFile>,
     diagnostics_parser: parser::DiagnosticsParser,
@@ -447,21 +427,12 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
             struct Configuration {
                 #[serde(alias = "logLevel")]
                 log_level: String,
-                #[serde(alias = "extraExtension")]
-                extra_extension: HashSet<String>,
             }
 
             if let Some(settings) = params.settings.as_object().unwrap().get("mcglsl") {
                 let config: Configuration = from_value(settings.to_owned()).unwrap();
 
                 info!("got updated configuration"; "config" => params.settings.as_object().unwrap().get("mcglsl").unwrap().to_string());
-
-                // Remove all current extensions does not exist in BASIC_FILE_EXTENSIONS
-                self.file_extensions.clone_from(&BASIC_FILE_EXTENSIONS);
-                // Add extensions provided by new configuration
-                for extension in config.extra_extension {
-                    self.file_extensions.insert(OsString::from(extension));
-                }
 
                 // Rebuilt dependency graph to add files with new extensions to graph
                 info!("rebuilding dependency graph with changed configuration");
