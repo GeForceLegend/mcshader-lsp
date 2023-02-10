@@ -221,6 +221,16 @@ impl MinecraftShaderLanguageServer {
         }
     }
 
+    fn remove_shader_file(&mut self, file_path: &PathBuf) {
+        self.shader_files.remove(file_path);
+        for include_file in &mut self.include_files {
+            let included_shaders = include_file.1.included_shaders_mut();
+            if included_shaders.contains(file_path) {
+                included_shaders.remove(file_path);
+            }
+        }
+    }
+
     fn build_file_framework(&mut self) {
         info!("generating file framework on current root"; "root" => self.root.to_str().unwrap());
 
@@ -299,14 +309,17 @@ impl MinecraftShaderLanguageServer {
         self.diagnostics_parser.parse_diagnostics(validation_result.unwrap(), file_list)
     }
 
-    fn update_lint(&self, path: &PathBuf) {
+    fn update_lint(&mut self, path: &PathBuf) {
         let mut diagnostics: HashMap<Url, Vec<Diagnostic>> = HashMap::new();
         if self.shader_files.contains_key(path) {
             diagnostics.extend(self.lint_shader(path));
         }
         if self.include_files.contains_key(path) {
-            let shader_files = self.include_files.get(path).unwrap();
-            for shader_path in shader_files.included_shaders() {
+            let shader_files = self.include_files.get(path).unwrap().clone();
+            for shader_path in shader_files.included_shaders().clone() {
+                if !shader_path.exists() {
+                    self.remove_shader_file(&shader_path);
+                }
                 diagnostics.extend(self.lint_shader(&shader_path));
             }
         }
@@ -456,7 +469,19 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
         });
     }
 
-    fn did_change_watched_files(&mut self, _: DidChangeWatchedFilesParams) {}
+    fn did_change_watched_files(&mut self, params: DidChangeWatchedFilesParams) {
+        logging::slog_with_trace_id(|| {
+            for change in params.changes {
+                let path = PathBuf::from_url(change.uri);
+                if change.typ != FileChangeType::DELETED {
+                    continue;
+                }
+                if self.shader_files.contains_key(&path) {
+                    self.remove_shader_file(&path);
+                }
+            }
+        })
+    }
 
     fn completion(&mut self, _: TextDocumentPositionParams, completable: LSCompletable<CompletionList>) {
         completable.complete(Err(Self::error_not_available(())));

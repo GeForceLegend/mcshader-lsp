@@ -144,6 +144,10 @@ impl IncludeFile {
         &self.included_shaders
     }
 
+    pub fn included_shaders_mut(&mut self) -> &mut HashSet<PathBuf> {
+        &mut self.included_shaders
+    }
+
     pub fn including_files(&self) -> &LinkedList<(usize, usize, usize, PathBuf)> {
         &self.including_files
     }
