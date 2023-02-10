@@ -278,8 +278,9 @@ impl MinecraftShaderLanguageServer {
         }
     }
 
-    fn lint_shader(&self, path: &PathBuf) -> HashMap<Url, Vec<Diagnostic>> {
+    fn lint_shader(&mut self, path: &PathBuf) -> HashMap<Url, Vec<Diagnostic>> {
         if !path.exists() {
+            self.remove_shader_file(path);
             return HashMap::new();
         }
         let shader_file = self.shader_files.get(path).unwrap();
@@ -317,9 +318,6 @@ impl MinecraftShaderLanguageServer {
         if self.include_files.contains_key(path) {
             let shader_files = self.include_files.get(path).unwrap().clone();
             for shader_path in shader_files.included_shaders().clone() {
-                if !shader_path.exists() {
-                    self.remove_shader_file(&shader_path);
-                }
                 diagnostics.extend(self.lint_shader(&shader_path));
             }
         }
