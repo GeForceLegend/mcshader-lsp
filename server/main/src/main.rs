@@ -23,7 +23,7 @@ use std::{
 };
 
 use slog::Level;
-use slog_scope::{debug, error, info, warn};
+use slog_scope::{error, info, warn};
 
 use anyhow::{Result};
 
@@ -290,7 +290,6 @@ impl MinecraftShaderLanguageServer {
         let validation_result = self.opengl_context.clone().validate_shader(shader_file.file_type(), &shader_content);
 
         // Copied from original file
-        info!("below info is provided by the new file system");
         match &validation_result {
             Some(output) => {
                 info!("compilation errors reported"; "errors" => format!("`{}`", output.replace('\n', "\\n")), "tree_root" => path.to_str().unwrap())
