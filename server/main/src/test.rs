@@ -332,7 +332,7 @@ fn test07_rewrited_file_system() {
     // let mut shader_files: String = String::from("shader files are");
     for file in &server.shader_files {
 
-        let mut file_list: HashMap<i32, PathBuf> = HashMap::new();
+        let mut file_list: HashMap<String, PathBuf> = HashMap::new();
         let shader_content = file.1.merge_shader_file(&server.include_files, &mut file_list);
         info!("{}", shader_content);
 

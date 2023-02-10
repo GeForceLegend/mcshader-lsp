@@ -335,10 +335,10 @@ impl MinecraftShaderLanguageServer {
         }
     }
 
-    fn lint_shader(&self, path: &PathBuf) {
+    fn lint_shader(&self, path: &PathBuf) -> HashMap<Url, Vec<Diagnostic>> {
         let shader_file = self.shader_files.get(path).unwrap();
 
-        let mut file_list: HashMap<i32, PathBuf> = HashMap::new();
+        let mut file_list: HashMap<String, PathBuf> = HashMap::new();
         let shader_content = shader_file.merge_shader_file(&self.include_files, &mut file_list);
 
         let validation_result = self.opengl_context.clone().validate_shader(shader_file.file_type(), &shader_content);
@@ -348,10 +348,14 @@ impl MinecraftShaderLanguageServer {
             Some(output) => {
                 info!("compilation errors reported"; "errors" => format!("`{}`", output.replace('\n', "\\n")), "tree_root" => path.to_str().unwrap())
             }
-            None => info!("compilation reported no errors"; "tree_root" => path.to_str().unwrap()),
+            None => {
+                info!("compilation reported no errors"; "tree_root" => path.to_str().unwrap());
+                return HashMap::new();
+            },
         };
         info!("above info is provided by the new file system");
 
+        self.diagnostics_parser.parse_diagnostics(validation_result.unwrap(), file_list)
     }
 
     fn build_initial_graph(&self) {
@@ -766,7 +770,6 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
             self.set_status("loading", "Building dependency graph...", "$(loading~spin)");
 
             self.root = root;
-
 
             self.build_initial_graph();
             self.build_file_framework();

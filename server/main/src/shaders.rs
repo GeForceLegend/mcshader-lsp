@@ -87,9 +87,9 @@ impl ShaderFile {
             });
     }
 
-    pub fn merge_shader_file(&self, include_files: &HashMap<PathBuf, IncludeFile>, file_list: &mut HashMap<i32, PathBuf>) -> String {
+    pub fn merge_shader_file(&self, include_files: &HashMap<PathBuf, IncludeFile>, file_list: &mut HashMap<String, PathBuf>) -> String {
         let mut shader_content: String = String::new();
-        file_list.insert(0, self.path.clone());
+        file_list.insert("0".to_owned(), self.path.clone());
 
         let mut including_files = self.including_files.clone();
         let mut next_include_file = match including_files.pop_front() {
@@ -234,13 +234,13 @@ impl IncludeFile {
             });
     }
 
-    pub fn merge_include(&self, original_content: &String, include_files: &HashMap<PathBuf, IncludeFile>, file_list: &mut HashMap<i32, PathBuf>, file_id: &mut i32, depth: i32) -> String {
+    pub fn merge_include(&self, original_content: &String, include_files: &HashMap<PathBuf, IncludeFile>, file_list: &mut HashMap<String, PathBuf>, file_id: &mut i32, depth: i32) -> String {
         if !self.path.exists() || depth > 10 {
             original_content.clone() + "\n"
         }
         else {
             let mut include_content: String = String::new();
-            file_list.insert(file_id.clone(), self.path.clone());
+            file_list.insert(file_id.clone().to_string(), self.path.clone());
             include_content += &format!("#line 1 {}\n", &file_id.to_string());
 
             let curr_file_id = file_id.clone();

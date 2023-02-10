@@ -4,14 +4,14 @@ use std::{
 };
 
 use regex::Regex;
-use rust_lsp::lsp_types::Diagnostic;
+use rust_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Range, Position};
 use slog_scope::debug;
 use url::Url;
 
-use crate::opengl::{self, ShaderValidator};
+use crate::{opengl::{self, ShaderValidator}, consts};
 
 pub struct DiagnosticsParser {
-    line_offset: i32,
+    line_offset: u32,
     line_regex: Regex,
 }
 
@@ -34,13 +34,67 @@ impl DiagnosticsParser {
         }
     }
 
-    pub fn parse_diagnostics(&self, compile_log: String, files: HashMap<i32, PathBuf>) -> HashMap<Url, Vec<Diagnostic>> {
+    pub fn parse_diagnostics(&self, compile_log: String, file_list: HashMap<String, PathBuf>) -> HashMap<Url, Vec<Diagnostic>> {
         let mut diagnostics: HashMap<Url, Vec<Diagnostic>> = HashMap::new();
 
         debug!("diagnostics regex selected"; "regex" => &self.line_regex.to_string());
+        let default_path = file_list.get("0").unwrap();
 
-        for line in compile_log.split('\n').collect::<Vec<&str>>() {
-            ;
+        for log_line in compile_log.split('\n').collect::<Vec<&str>>() {
+            let diagnostic_capture = match self.line_regex.captures(log_line) {
+                Some(captures) => captures,
+                None => continue,
+            };
+
+            debug!("found match for output line"; "line" => log_line, "capture" => format!("{:?}", diagnostic_capture));
+
+            let msg = diagnostic_capture.name("output").unwrap().as_str();
+
+            let line = match diagnostic_capture.name("linenum") {
+                Some(c) => c.as_str().parse::<u32>().unwrap_or(0),
+                None => 0,
+            } - self.line_offset;
+
+            let severity = match diagnostic_capture.name("severity") {
+                Some(c) => match c.as_str().to_lowercase().as_str() {
+                    "error" => DiagnosticSeverity::ERROR,
+                    "warning" => DiagnosticSeverity::WARNING,
+                    _ => DiagnosticSeverity::INFORMATION,
+                },
+                _ => DiagnosticSeverity::INFORMATION,
+            };
+
+            let file_path = match diagnostic_capture.name("filepath") {
+                Some(index) => {
+                    file_list.get(index.as_str()).unwrap()
+                }
+                None => default_path,
+            };
+            let file_url = Url::from_file_path(file_path).unwrap();
+
+            let diagnostic = Diagnostic {
+                range: Range::new(
+                    /* Position::new(line, leading_whitespace as u64),
+                    Position::new(line, line_text.len() as u64) */
+                    Position::new(line, 0),
+                    Position::new(line, 1000),
+                ),
+                code: None,
+                severity: Some(severity),
+                source: Some(consts::SOURCE.into()),
+                message: msg.trim().into(),
+                related_information: None,
+                tags: None,
+                code_description: Option::None,
+                data: Option::None,
+            };
+
+            match diagnostics.get_mut(&file_url) {
+                Some(d) => d.push(diagnostic),
+                None => {
+                    diagnostics.insert(file_url, vec![diagnostic]);
+                }
+            };
         }
 
         diagnostics
