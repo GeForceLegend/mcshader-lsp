@@ -714,7 +714,6 @@ dependencies = [
  "logging",
  "logging_macro",
  "mockall",
- "once_cell",
  "path-slash",
  "percent-encoding",
  "petgraph",

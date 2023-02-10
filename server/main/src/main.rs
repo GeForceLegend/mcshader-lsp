@@ -1,11 +1,8 @@
-#![feature(once_cell)]
 #![feature(option_get_or_insert_default)]
 
 use rust_lsp::jsonrpc::{method_types::*, *};
 use rust_lsp::lsp::*;
 use rust_lsp::lsp_types::{notification::*, *};
-
-use path_slash::PathExt;
 
 use serde::Deserialize;
 use serde_json::{from_value, Value};
@@ -22,7 +19,7 @@ use std::rc::Rc;
 
 use std::{
     cell::RefCell,
-    path::{Path, PathBuf},
+    path::{PathBuf},
 };
 
 use slog::Level;
@@ -45,19 +42,7 @@ mod parser;
 mod shaders;
 mod url_norm;
 
-pub fn is_top_level(path: &Path) -> bool {
-    let path = path.to_slash().unwrap();
-    if !RE_WORLD_FOLDER.is_match(&path) {
-        return false;
-    }
-    let parts: Vec<&str> = path.split("/").collect();
-    let len = parts.len();
-    (len == 3 || len == 2) && TOPLEVEL_FILES.contains(parts[len - 1])
-}
-
 lazy_static! {
-    static ref RE_INCLUDE: Regex = Regex::new(r#"^(?:\s)*?(?:#include) "(.+)"\r?"#).unwrap();
-    static ref RE_WORLD_FOLDER: Regex = Regex::new(r#"^shaders(/world-?\d+)?"#).unwrap();
     static ref RE_DIMENSION_FOLDER: Regex = Regex::new(r#"^world-?\d+"#).unwrap();
     static ref TOPLEVEL_FILES: HashSet<String> = {
         let mut set = HashSet::with_capacity(1716);
