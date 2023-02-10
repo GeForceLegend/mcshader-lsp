@@ -36,6 +36,8 @@ pub fn new_temp_server(opengl_context: Option<Box<dyn opengl::ShaderValidator>>)
 
     let context = opengl_context.unwrap_or_else(|| Box::new(opengl::MockShaderValidator::new()));
 
+    let ogl_context = Rc::new(opengl::OpenGlContext::new());
+
     MinecraftShaderLanguageServer {
         endpoint,
         graph: Rc::new(RefCell::new(graph::CachedStableGraph::new())),
@@ -47,6 +49,7 @@ pub fn new_temp_server(opengl_context: Option<Box<dyn opengl::ShaderValidator>>)
         file_extensions: HashSet::new(),
         shader_files: HashMap::new(),
         include_files: HashMap::new(),
+        diagnostics_parser: parser::DiagnosticsParser::new(ogl_context.as_ref()),
     }
 }
 
@@ -333,9 +336,14 @@ fn test07_rewrited_file_system() {
         let shader_content = file.1.merge_shader_file(&server.include_files, &mut file_list);
         info!("{}", shader_content);
 
-        for include_file in file_list {
-            info!("{} {}", include_file.0, include_file.1.to_str().unwrap());
-        }
+        info!("{}", file.1.file_type());
+
+        let compile_log = match server.opengl_context.clone().validate_shader(file.1.file_type(), &shader_content) {
+            Some(log) => log,
+            None => "".to_string()
+        };
+
+        info!("{}", compile_log);
 
         // shader_files += "\n\t";
         // shader_files += &String::from(file.0.to_str().unwrap());

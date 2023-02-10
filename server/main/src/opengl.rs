@@ -9,6 +9,7 @@ use mockall::automock;
 #[cfg_attr(test, automock)]
 pub trait ShaderValidator {
     fn validate(&self, tree_type: super::TreeType, source: &str) -> Option<String>;
+    fn validate_shader(&self, file_type: &gl::types::GLenum, source: &str) -> Option<String>;
     fn vendor(&self) -> String;
 }
 
@@ -95,6 +96,13 @@ impl ShaderValidator for OpenGlContext {
                     self.compile_and_get_shader_log(compute_shader, source)
                 }
             }
+        }
+    }
+    
+    fn validate_shader(&self, file_type: &gl::types::GLenum, source: &str) -> Option<String> {
+        unsafe {
+            let shader = gl::CreateShader(file_type.clone());
+            self.compile_and_get_shader_log(shader, source)
         }
     }
 

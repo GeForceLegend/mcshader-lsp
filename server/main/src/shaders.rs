@@ -8,7 +8,7 @@ use path_slash::PathBufExt;
 use regex::Regex;
 
 use lazy_static::lazy_static;
-use slog_scope::{info, error};
+use slog_scope::{error};
 
 lazy_static! {
     static ref RE_MACRO_INCLUDE: Regex = Regex::new(r#"^(?:\s)*?(?:#include) "(.+)"\r?"#).unwrap();
@@ -17,6 +17,8 @@ lazy_static! {
 pub struct ShaderFile {
     // File path
     path: PathBuf,
+    // Type of the shader
+    file_type: gl::types::GLenum,
     // The work space that this file in
     work_space: PathBuf,
     // Files included in this file (line, file path)
@@ -24,8 +26,8 @@ pub struct ShaderFile {
 }
 
 impl ShaderFile {
-    pub fn including_files(&self) -> &LinkedList<(usize, PathBuf)> {
-        &self.including_files
+    pub fn file_type(&self) -> &gl::types::GLenum {
+        &self.file_type
     }
 
     pub fn clear_including_files(&mut self) {
@@ -35,6 +37,7 @@ impl ShaderFile {
     pub fn new(work_space: &PathBuf, path: &PathBuf) -> ShaderFile {
         ShaderFile {
             path: path.clone(),
+            file_type: gl::NONE,
             work_space: work_space.clone(),
             including_files: LinkedList::new(),
         }
@@ -42,6 +45,19 @@ impl ShaderFile {
 
     pub fn read_file (&mut self, include_files: &mut HashMap<PathBuf, IncludeFile>) {
         let shader_path = self.path.as_path();
+
+        let extension = shader_path.extension().unwrap();
+        self.file_type = if extension == "fsh" {
+                gl::FRAGMENT_SHADER
+            } else if extension == "vsh" {
+                gl::VERTEX_SHADER
+            } else if extension == "gsh" {
+                gl::GEOMETRY_SHADER
+            } else if extension == "csh" {
+                gl::COMPUTE_SHADER
+            } else {
+                gl::NONE
+            };
 
         let mut parent_path: HashSet<PathBuf> = HashSet::new();
         parent_path.insert(self.path.clone());
@@ -123,14 +139,6 @@ pub struct IncludeFile {
 }
 
 impl IncludeFile {
-    pub fn included_shaders(&self) -> &HashSet<PathBuf> {
-        &self.included_shaders
-    }
-
-    pub fn including_files(&self) -> &LinkedList<(usize, PathBuf)> {
-        &self.including_files
-    }
-
     pub fn update_parent(include_path: &PathBuf, parent_file: &HashSet<PathBuf>, include_files: &mut HashMap<PathBuf, IncludeFile>, depth: i32) {
         if depth > 10 {
             return;

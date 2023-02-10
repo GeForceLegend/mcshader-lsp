@@ -54,6 +54,7 @@ mod lsp_ext;
 mod merge_views;
 mod navigation;
 mod opengl;
+mod parser;
 mod shaders;
 mod source_mapper;
 mod url_norm;
@@ -165,17 +166,20 @@ fn main() {
     let mut parser = Parser::new();
     parser.set_language(tree_sitter_glsl::language()).unwrap();
 
+    let opengl_context = Rc::new(opengl::OpenGlContext::new());
+
     let mut langserver = MinecraftShaderLanguageServer {
         endpoint: endpoint_output.clone(),
         graph: Rc::new(RefCell::new(cache_graph)),
         root: "".into(),
         command_provider: None,
-        opengl_context: Rc::new(opengl::OpenGlContext::new()),
+        opengl_context: opengl_context.clone(),
         tree_sitter: Rc::new(RefCell::new(parser)),
         log_guard: Some(guard),
         file_extensions: BASIC_FILE_EXTENSIONS.clone(),
         shader_files: HashMap::new(),
         include_files: HashMap::new(),
+        diagnostics_parser: parser::DiagnosticsParser::new(opengl_context.as_ref()),
     };
 
     langserver.command_provider = Some(commands::CustomCommandProvider::new(vec![
@@ -213,6 +217,7 @@ pub struct MinecraftShaderLanguageServer {
     file_extensions: HashSet<OsString>,
     shader_files: HashMap<PathBuf, shaders::ShaderFile>,
     include_files: HashMap<PathBuf, shaders::IncludeFile>,
+    diagnostics_parser: parser::DiagnosticsParser,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -335,6 +340,18 @@ impl MinecraftShaderLanguageServer {
 
         let mut file_list: HashMap<i32, PathBuf> = HashMap::new();
         let shader_content = shader_file.merge_shader_file(&self.include_files, &mut file_list);
+
+        let validation_result = self.opengl_context.clone().validate_shader(shader_file.file_type(), &shader_content);
+
+        // Copied from original file
+        match &validation_result {
+            Some(output) => {
+                info!("compilation errors reported"; "errors" => format!("`{}`", output.replace('\n', "\\n")), "tree_root" => path.to_str().unwrap())
+            }
+            None => info!("compilation reported no errors"; "tree_root" => path.to_str().unwrap()),
+        };
+        info!("above info is provided by the new file system");
+
     }
 
     fn build_initial_graph(&self) {
@@ -839,6 +856,10 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
             }
             self.update_includes(&path);
             self.update_file(&path);
+
+            if self.shader_files.contains_key(&path) {
+                let _a = self.lint_shader(&path);
+            }
 
             match self.lint(&path) {
                 Ok(diagnostics) => self.publish_diagnostic(diagnostics, None),
