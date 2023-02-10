@@ -1,12 +1,10 @@
 #![feature(once_cell)]
 #![feature(option_get_or_insert_default)]
 
-use merge_views::FilialTuple;
 use rust_lsp::jsonrpc::{method_types::*, *};
 use rust_lsp::lsp::*;
 use rust_lsp::lsp_types::{notification::*, *};
 
-use petgraph::stable_graph::NodeIndex;
 use path_slash::PathExt;
 
 use serde::Deserialize;
@@ -15,17 +13,13 @@ use serde_json::{from_value, Value};
 use tree_sitter::Parser;
 use url_norm::FromUrl;
 
-use walkdir::WalkDir;
-
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::ffi::OsString;
 use std::fmt::{Debug, Display, Formatter};
-use std::fs;
-use std::io::{stdin, stdout, BufRead, BufReader};
-use std::iter::{Extend, FromIterator};
+use std::io::{stdin, stdout};
+use std::iter::{Extend};
 use std::rc::Rc;
-use std::str::FromStr;
 
 use std::{
     cell::RefCell,
@@ -34,8 +28,6 @@ use std::{
 
 use slog::Level;
 use slog_scope::{debug, error, info, warn};
-
-use path_slash::PathBufExt;
 
 use anyhow::{anyhow, Result};
 
@@ -46,12 +38,9 @@ use lazy_static::lazy_static;
 mod commands;
 mod configuration;
 mod consts;
-mod dfs;
-mod diagnostics_parser;
 mod graph;
 mod linemap;
 mod lsp_ext;
-mod merge_views;
 mod navigation;
 mod opengl;
 mod parser;
@@ -186,12 +175,6 @@ fn main() {
         (
             "graphDot",
             Box::new(commands::graph_dot::GraphDotCommand {
-                graph: langserver.graph.clone(),
-            }),
-        ),
-        (
-            "virtualMerge",
-            Box::new(commands::merged_includes::VirtualMergedDocument {
                 graph: langserver.graph.clone(),
             }),
         ),
@@ -336,6 +319,9 @@ impl MinecraftShaderLanguageServer {
     }
 
     fn lint_shader(&self, path: &PathBuf) -> HashMap<Url, Vec<Diagnostic>> {
+        if !path.exists() {
+            return HashMap::new();
+        }
         let shader_file = self.shader_files.get(path).unwrap();
 
         let mut file_list: HashMap<String, PathBuf> = HashMap::new();
@@ -344,353 +330,37 @@ impl MinecraftShaderLanguageServer {
         let validation_result = self.opengl_context.clone().validate_shader(shader_file.file_type(), &shader_content);
 
         // Copied from original file
+        info!("below info is provided by the new file system");
         match &validation_result {
             Some(output) => {
                 info!("compilation errors reported"; "errors" => format!("`{}`", output.replace('\n', "\\n")), "tree_root" => path.to_str().unwrap())
             }
             None => {
                 info!("compilation reported no errors"; "tree_root" => path.to_str().unwrap());
-                return HashMap::new();
+                let mut diagnostics: HashMap<Url, Vec<Diagnostic>> = HashMap::new();
+                diagnostics.entry(Url::from_file_path(path.clone()).unwrap()).or_default();
+                for include_file in shader_file.including_files() {
+                    diagnostics.entry(Url::from_file_path(include_file.1.clone()).unwrap()).or_default();
+                }
+                return diagnostics;
             },
         };
-        info!("above info is provided by the new file system");
 
         self.diagnostics_parser.parse_diagnostics(validation_result.unwrap(), file_list)
     }
 
-    fn build_initial_graph(&self) {
-        info!("generating graph for current root"; "root" => self.root.to_str().unwrap());
-
-        // filter directories and files not ending in any of the 3 extensions
-        WalkDir::new(&self.root)
-            .into_iter()
-            .filter_map(|entry| {
-                if entry.is_err() {
-                    return None;
-                }
-
-                let entry = entry.unwrap();
-                let path = entry.path();
-                if path.is_dir() {
-                    return None;
-                }
-
-                let ext = match path.extension() {
-                    Some(e) => e,
-                    None => return None,
-                };
-
-                if !self.file_extensions.contains(ext) {
-                    return None;
-                }
-
-                Some(entry.into_path())
-            })
-            .for_each(|path| {
-                // iterate all valid found files, search for includes, add a node into the graph for each
-                // file and add a file->includes KV into the map
-                self.add_file_and_includes_to_graph(&path);
-            });
-
-        info!("finished building project include graph");
-    }
-
-    fn add_file_and_includes_to_graph(&self, path: &Path) {
-        let includes = self.find_includes(path);
-
-        let idx = self.graph.borrow_mut().add_node(path);
-
-        debug!("adding includes for new file"; "file" => path.to_str().unwrap(), "includes" => format!("{:?}", includes));
-        for include in includes {
-            self.add_include(include, idx);
-        }
-    }
-
-    fn add_include(&self, include: (PathBuf, IncludePosition), node: NodeIndex) {
-        let child = self.graph.borrow_mut().add_node(&include.0);
-        self.graph.borrow_mut().add_edge(node, child, include.1);
-    }
-
-    pub fn find_includes(&self, file: &Path) -> Vec<(PathBuf, IncludePosition)> {
-        let mut includes = Vec::default();
-
-        let buf = BufReader::new(std::fs::File::open(file).unwrap());
-        buf.lines()
-            .enumerate()
-            .filter_map(|line| match line.1 {
-                Ok(t) => Some((line.0, t)),
-                Err(_e) => None,
-            })
-            .filter(|line| RE_INCLUDE.is_match(line.1.as_str()))
-            .for_each(|line| {
-                let cap = RE_INCLUDE.captures(line.1.as_str()).unwrap().get(1).unwrap();
-
-                let start = cap.start();
-                let end = cap.end();
-                let mut path: String = cap.as_str().into();
-
-                let full_include = if path.starts_with('/') {
-                    path = path.strip_prefix('/').unwrap().to_string();
-                    self.root.join("shaders").join(PathBuf::from_slash(&path))
-                } else {
-                    file.parent().unwrap().join(PathBuf::from_slash(&path))
-                };
-
-                includes.push((full_include, IncludePosition { line: line.0, start, end }));
-            });
-
-        includes
-    }
-
-    fn update_includes(&self, file: &Path) {
-        let includes = self.find_includes(file);
-
-        info!("includes found for file"; "file" => file.to_str().unwrap(), "includes" => format!("{:?}", includes));
-
-        let idx = match self.graph.borrow_mut().find_node(file) {
-            None => return,
-            Some(n) => n,
-        };
-
-        let prev_children: HashSet<_> = HashSet::from_iter(self.graph.borrow().get_all_child_positions(idx).map(|tup| {
-            (self.graph.borrow().get_node(tup.0), tup.1)
-        }));
-        let new_children: HashSet<_> = includes.iter().cloned().collect();
-
-        let to_be_added = new_children.difference(&prev_children);
-        let to_be_removed = prev_children.difference(&new_children);
-
-        debug!(
-            "include sets diff'd";
-            "for removal" => format!("{:?}", to_be_removed),
-            "for addition" => format!("{:?}", to_be_added)
-        );
-
-        for removal in to_be_removed {
-            let child = self.graph.borrow_mut().find_node(&removal.0).unwrap();
-            self.graph.borrow_mut().remove_edge(idx, child, removal.1);
-        }
-
-        for insertion in to_be_added {
-            self.add_include(includes.iter().find(|f| f.0 == *insertion.0).unwrap().clone(), idx);
-        }
-    }
-
-    pub fn lint(&self, uri: &Path) -> Result<HashMap<Url, Vec<Diagnostic>>> {
-        // get all top level ancestors of this file
-        let file_ancestors = match self.get_file_toplevel_ancestors(uri) {
-            Ok(opt) => match opt {
-                Some(ancestors) => ancestors,
-                None => vec![],
-            },
-            Err(e) => return Err(e),
-        };
-
-        info!(
-            "top-level file ancestors found";
-            "uri" => uri.to_str().unwrap(),
-            "ancestors" => format!("{:?}", file_ancestors
-                .iter()
-                .map(|e| PathBuf::from_str(
-                    &self.graph.borrow().graph[*e].clone()
-                )
-                .unwrap())
-                .collect::<Vec<PathBuf>>())
-        );
-
-        // the set of all filepath->content.
-        let mut all_sources: HashMap<PathBuf, String> = HashMap::new();
-        // the set of filepath->list of diagnostics to report
+    fn update_lint(&self, path: &PathBuf) {
         let mut diagnostics: HashMap<Url, Vec<Diagnostic>> = HashMap::new();
-
-        // we want to backfill the diagnostics map with all linked sources
-        let back_fill = |all_sources: &HashMap<PathBuf, String>, diagnostics: &mut HashMap<Url, Vec<Diagnostic>>| {
-            for path in all_sources.keys() {
-                diagnostics.entry(Url::from_file_path(path).unwrap()).or_default();
-            }
-        };
-
-        // if we are a top-level file (this has to be one of the set defined by Optifine, right?)
-        if file_ancestors.is_empty() {
-            // gather the list of all descendants
-            let root = self.graph.borrow_mut().find_node(uri).unwrap();
-            let tree = match self.get_dfs_for_node(root) {
-                Ok(tree) => tree,
-                Err(e) => {
-                    diagnostics.insert(Url::from_file_path(uri).unwrap(), vec![e.into()]);
-                    return Ok(diagnostics);
-                }
-            };
-
-            all_sources.extend(self.load_sources(&tree)?);
-
-            let mut source_mapper = source_mapper::SourceMapper::new(all_sources.len());
-
-            let view = {
-                let graph = self.graph.borrow();
-                let merged_string = {
-                    merge_views::MergeViewBuilder::new(&tree, &all_sources, &graph, &mut source_mapper).build()
-                };
-                merged_string
-            };
-
-            let root_path = self.graph.borrow().get_node(root);
-            let ext = match root_path.extension() {
-                Some(ext) => ext.to_str().unwrap(),
-                None => {
-                    back_fill(&all_sources, &mut diagnostics);
-                    return Ok(diagnostics);
-                }
-            };
-
-            if !is_top_level(root_path.strip_prefix(&self.root).unwrap()) {
-                warn!("got a non-valid toplevel file"; "root_ancestor" => root_path.to_str().unwrap(), "stripped" => root_path.strip_prefix(&self.root).unwrap().to_str().unwrap());
-                back_fill(&all_sources, &mut diagnostics);
-                return Ok(diagnostics);
-            }
-
-            let tree_type = if ext == "fsh" {
-                TreeType::Fragment
-            } else if ext == "vsh" {
-                TreeType::Vertex
-            } else if ext == "gsh" {
-                TreeType::Geometry
-            } else if ext == "csh" {
-                TreeType::Compute
-            } else {
-                unreachable!();
-            };
-
-            let stdout = match self.compile_shader_source(&view, tree_type, &root_path) {
-                Some(s) => s,
-                None => {
-                    back_fill(&all_sources, &mut diagnostics);
-                    return Ok(diagnostics);
-                }
-            };
-
-            let diagnostics_parser = diagnostics_parser::DiagnosticsParser::new(self.opengl_context.as_ref());
-
-            diagnostics.extend(diagnostics_parser.parse_diagnostics_output(stdout, uri, &source_mapper, &self.graph.borrow()));
-        } else {
-            let mut all_trees: Vec<(TreeType, Vec<FilialTuple>)> = Vec::new();
-
-            for root in &file_ancestors {
-                let nodes = match self.get_dfs_for_node(*root) {
-                    Ok(nodes) => nodes,
-                    Err(e) => {
-                        diagnostics.insert(Url::from_file_path(uri).unwrap(), vec![e.into()]);
-                        back_fill(&all_sources, &mut diagnostics); // TODO: confirm
-                        return Ok(diagnostics);
-                    }
-                };
-
-                let root_path = self.graph.borrow().get_node(*root).clone();
-                let ext = match root_path.extension() {
-                    Some(ext) => ext.to_str().unwrap(),
-                    None => continue,
-                };
-
-                if !is_top_level(root_path.strip_prefix(&self.root).unwrap()) {
-                    warn!("got a non-valid toplevel file"; "root_ancestor" => root_path.to_str().unwrap(), "stripped" => root_path.strip_prefix(&self.root).unwrap().to_str().unwrap());
-                    continue;
-                }
-
-                let tree_type = if ext == "fsh" {
-                    TreeType::Fragment
-                } else if ext == "vsh" {
-                    TreeType::Vertex
-                } else if ext == "gsh" {
-                    TreeType::Geometry
-                } else if ext == "csh" {
-                    TreeType::Compute
-                } else {
-                    unreachable!();
-                };
-
-                let sources = self.load_sources(&nodes)?;
-                all_trees.push((tree_type, nodes));
-                all_sources.extend(sources);
-            }
-
-            for tree in all_trees {
-                // bit over-zealous in allocation but better than having to resize
-                let mut source_mapper = source_mapper::SourceMapper::new(all_sources.len());
-                let view = {
-                    let graph = self.graph.borrow();
-                    let merged_string = {
-                        merge_views::MergeViewBuilder::new(&tree.1, &all_sources, &graph, &mut source_mapper).build()
-                    };
-                    merged_string
-                };
-
-                let root_path = self.graph.borrow().get_node(tree.1.first().unwrap().child);
-                let stdout = match self.compile_shader_source(&view, tree.0, &root_path) {
-                    Some(s) => s,
-                    None => continue,
-                };
-
-                let diagnostics_parser = diagnostics_parser::DiagnosticsParser::new(self.opengl_context.as_ref());
-
-                diagnostics.extend(diagnostics_parser.parse_diagnostics_output(stdout, uri, &source_mapper, &self.graph.borrow()));
-            }
-        };
-
-        back_fill(&all_sources, &mut diagnostics);
-        Ok(diagnostics)
-    }
-
-    fn compile_shader_source(&self, source: &str, tree_type: TreeType, path: &Path) -> Option<String> {
-        let result = self.opengl_context.clone().validate(tree_type, source);
-        match &result {
-            Some(output) => {
-                info!("compilation errors reported"; "errors" => format!("`{}`", output.replace('\n', "\\n")), "tree_root" => path.to_str().unwrap())
-            }
-            None => info!("compilation reported no errors"; "tree_root" => path.to_str().unwrap()),
-        };
-        result
-    }
-
-    pub fn get_dfs_for_node(&self, root: NodeIndex) -> Result<Vec<FilialTuple>, dfs::error::CycleError> {
-        let graph_ref = self.graph.borrow();
-
-        let dfs = dfs::Dfs::new(&graph_ref, root);
-
-        dfs.collect::<Result<_, _>>()
-    }
-
-    pub fn load_sources(&self, nodes: &[FilialTuple]) -> Result<HashMap<PathBuf, String>> {
-        let mut sources = HashMap::new();
-
-        for node in nodes {
-            let graph = self.graph.borrow();
-            let path = graph.get_node(node.child);
-
-            if sources.contains_key(&path) {
-                continue;
-            }
-
-            let source = match fs::read_to_string(&path) {
-                Ok(s) => s,
-                Err(e) => return Err(anyhow!("error reading {:?}: {}", path, e)),
-            };
-            let source = source.replace("\r\n", "\n");
-            sources.insert(path.clone(), source);
+        if self.shader_files.contains_key(path) {
+            diagnostics.extend(self.lint_shader(path));
         }
-
-        Ok(sources)
-    }
-
-    fn get_file_toplevel_ancestors(&self, uri: &Path) -> Result<Option<Vec<petgraph::stable_graph::NodeIndex>>> {
-        let curr_node = match self.graph.borrow_mut().find_node(uri) {
-            Some(n) => n,
-            None => return Err(anyhow!("node not found {:?}", uri)),
-        };
-        let roots = self.graph.borrow().collect_root_ancestors(curr_node);
-        if roots.is_empty() {
-            return Ok(None);
+        if self.include_files.contains_key(path) {
+            let shader_files = self.include_files.get(path).unwrap();
+            for shader_path in shader_files.included_shaders() {
+                diagnostics.extend(self.lint_shader(&shader_path));
+            }
         }
-        Ok(Some(roots))
+        self.publish_diagnostic(diagnostics, None);
     }
 
     pub fn publish_diagnostic(&self, diagnostics: HashMap<Url, Vec<Diagnostic>>, document_version: Option<i32>) {
@@ -771,7 +441,6 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
 
             self.root = root;
 
-            self.build_initial_graph();
             self.build_file_framework();
 
             self.set_status("ready", "Project initialized", "$(check)");
@@ -813,9 +482,6 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
                 info!("rebuilding dependency graph with changed configuration");
                 self.set_status("loading", "Rebuilding dependency graph...", "$(loading~spin)");
 
-                self.graph = Rc::new(RefCell::new(graph::CachedStableGraph::new()));
-                self.build_initial_graph();
-
                 self.clear_file_framework();
                 self.build_file_framework();
 
@@ -833,17 +499,7 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
         logging::slog_with_trace_id(|| {
             //info!("opened doc {}", params.text_document.uri);
             let path = PathBuf::from_url(params.text_document.uri);
-            if !path.starts_with(&self.root) {
-                return;
-            }
-
-            if self.graph.borrow_mut().find_node(&path) == None {
-                self.add_file_and_includes_to_graph(&path);
-            }
-            match self.lint(&path) {
-                Ok(diagnostics) => self.publish_diagnostic(diagnostics, None),
-                Err(e) => error!("error linting"; "error" => format!("{:?}", e), "path" => path.to_str().unwrap()),
-            }
+            self.update_lint(&path);
         });
     }
 
@@ -854,20 +510,8 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
     fn did_save_text_document(&mut self, params: DidSaveTextDocumentParams) {
         logging::slog_with_trace_id(|| {
             let path = PathBuf::from_url(params.text_document.uri);
-            if !path.starts_with(&self.root) {
-                return;
-            }
-            self.update_includes(&path);
             self.update_file(&path);
-
-            if self.shader_files.contains_key(&path) {
-                let _a = self.lint_shader(&path);
-            }
-
-            match self.lint(&path) {
-                Ok(diagnostics) => self.publish_diagnostic(diagnostics, None),
-                Err(e) => error!("error linting"; "error" => format!("{:?}", e), "path" => path.to_str().unwrap()),
-            }
+            self.update_lint(&path);
         });
     }
 

@@ -26,6 +26,9 @@ pub struct ShaderFile {
 }
 
 impl ShaderFile {
+    pub fn including_files(&self) -> &LinkedList<(usize, PathBuf)> {
+        &self.including_files
+    }
     pub fn file_type(&self) -> &gl::types::GLenum {
         &self.file_type
     }
@@ -139,6 +142,10 @@ pub struct IncludeFile {
 }
 
 impl IncludeFile {
+    pub fn included_shaders(&self) -> &HashSet<PathBuf> {
+        &self.included_shaders
+    }
+
     pub fn update_parent(include_path: &PathBuf, parent_file: &HashSet<PathBuf>, include_files: &mut HashMap<PathBuf, IncludeFile>, depth: i32) {
         if depth > 10 {
             return;

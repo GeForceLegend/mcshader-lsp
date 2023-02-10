@@ -6,7 +6,6 @@ use anyhow::{format_err, Result};
 use slog_scope::info;
 
 pub mod graph_dot;
-pub mod merged_includes;
 pub mod parse_tree;
 
 pub struct CustomCommandProvider {
