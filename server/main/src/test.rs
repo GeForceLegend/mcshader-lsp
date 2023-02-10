@@ -62,14 +62,6 @@ fn copy_files(files: &str, dest: &TempDir) {
     copy_items(&files, dest.path().join("shaders"), opts).unwrap();
 }
 
-pub fn copy_to_and_set_root(test_path: &str, server: &mut MinecraftShaderLanguageServer) -> (Rc<TempDir>, PathBuf) {
-    let (_tmp_dir, tmp_path) = copy_to_tmp_dir(test_path);
-
-    server.root = tmp_path.clone(); //format!("{}{}", "file://", tmp_path);
-
-    (_tmp_dir, tmp_path)
-}
-
 fn copy_to_tmp_dir(test_path: &str) -> (Rc<TempDir>, PathBuf) {
     let tmp_dir = Rc::new(TempDir::new("mcshader").unwrap());
     fs::create_dir(tmp_dir.path().join("shaders")).unwrap();

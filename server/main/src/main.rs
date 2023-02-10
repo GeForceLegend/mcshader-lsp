@@ -29,7 +29,7 @@ use std::{
 use slog::Level;
 use slog_scope::{debug, error, info, warn};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result};
 
 use regex::Regex;
 
@@ -340,7 +340,7 @@ impl MinecraftShaderLanguageServer {
                 let mut diagnostics: HashMap<Url, Vec<Diagnostic>> = HashMap::new();
                 diagnostics.entry(Url::from_file_path(path.clone()).unwrap()).or_default();
                 for include_file in shader_file.including_files() {
-                    diagnostics.entry(Url::from_file_path(include_file.1.clone()).unwrap()).or_default();
+                    diagnostics.entry(Url::from_file_path(include_file.3.clone()).unwrap()).or_default();
                 }
                 return diagnostics;
             },

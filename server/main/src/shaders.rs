@@ -21,12 +21,12 @@ pub struct ShaderFile {
     file_type: gl::types::GLenum,
     // The work space that this file in
     work_space: PathBuf,
-    // Files included in this file (line, file path)
-    including_files: LinkedList<(usize, PathBuf)>,
+    // Files included in this file (line, start char, end char, file path)
+    including_files: LinkedList<(usize, usize, usize, PathBuf)>,
 }
 
 impl ShaderFile {
-    pub fn including_files(&self) -> &LinkedList<(usize, PathBuf)> {
+    pub fn including_files(&self) -> &LinkedList<(usize, usize, usize, PathBuf)> {
         &self.including_files
     }
     pub fn file_type(&self) -> &gl::types::GLenum {
@@ -77,6 +77,9 @@ impl ShaderFile {
                 let cap = RE_MACRO_INCLUDE.captures(line.1.as_str()).unwrap().get(1).unwrap();
                 let path: String = cap.as_str().into();
 
+                let start = cap.start();
+                let end = cap.end();
+
                 let include_path = if path.starts_with('/') {
                     let path = path.strip_prefix('/').unwrap().to_string();
                     self.work_space.join(PathBuf::from_slash(&path))
@@ -84,7 +87,7 @@ impl ShaderFile {
                     shader_path.parent().unwrap().join(PathBuf::from_slash(&path))
                 };
 
-                self.including_files.push_back((line.0, include_path.clone()));
+                self.including_files.push_back((line.0, start, end, include_path.clone()));
 
                 IncludeFile::get_includes(&self.work_space, &include_path, &parent_path, include_files, 0);
             });
@@ -95,10 +98,7 @@ impl ShaderFile {
         file_list.insert("0".to_owned(), self.path.clone());
 
         let mut including_files = self.including_files.clone();
-        let mut next_include_file = match including_files.pop_front() {
-            Some(include_file) => include_file,
-            None => (usize::from(u16::MAX), PathBuf::from("/")),
-        };
+        let mut next_include_file = IncludeFile::next_include_file(&mut including_files);
         let mut file_id = 0;
 
         let shader_reader = BufReader::new(std::fs::File::open(self.path.clone()).unwrap());
@@ -110,14 +110,11 @@ impl ShaderFile {
             })
             .for_each(|line| {
                 if line.0 == next_include_file.0 {
-                    let include_file = include_files.get(&next_include_file.1).unwrap();
+                    let include_file = include_files.get(&next_include_file.3).unwrap();
                     file_id += 1;
                     let include_content = include_file.merge_include(&line.1, include_files, file_list, &mut file_id, 1);
                     shader_content += &include_content;
-                    next_include_file = match including_files.pop_front() {
-                        Some(include_file) => include_file,
-                        None => (usize::from(u16::MAX), PathBuf::from("/")),
-                    };
+                    next_include_file = IncludeFile::next_include_file(&mut including_files);
                     shader_content += &format!("#line {} 0\n", line.0 + 2);
                 }
                 else {
@@ -137,13 +134,20 @@ pub struct IncludeFile {
     work_space: PathBuf,
     // Shader files that include this file
     included_shaders: HashSet<PathBuf>,
-    // Files included in this file (line, file path)
-    including_files: LinkedList<(usize, PathBuf)>,
+    // Files included in this file (line, start char, end char, file path)
+    including_files: LinkedList<(usize, usize, usize, PathBuf)>,
 }
 
 impl IncludeFile {
     pub fn included_shaders(&self) -> &HashSet<PathBuf> {
         &self.included_shaders
+    }
+
+    pub fn next_include_file(including_files: &mut LinkedList<(usize, usize, usize, PathBuf)>) -> (usize, usize, usize, PathBuf) {
+        match including_files.pop_front() {
+            Some(include_file) => include_file,
+            None => (usize::from(u16::MAX), usize::from(u16::MAX), usize::from(u16::MAX), PathBuf::from("/")),
+        }
     }
 
     pub fn update_parent(include_path: &PathBuf, parent_file: &HashSet<PathBuf>, include_files: &mut HashMap<PathBuf, IncludeFile>, depth: i32) {
@@ -155,7 +159,7 @@ impl IncludeFile {
         include_files.insert(include_path.clone(), include_file.clone());
         
         for file in &include_file.including_files {
-            Self::update_parent(&file.1, parent_file, include_files, depth + 1);
+            Self::update_parent(&file.3, parent_file, include_files, depth + 1);
         }
     }
 
@@ -167,7 +171,7 @@ impl IncludeFile {
             let mut include = include_files.remove(include_path).unwrap();
             include.included_shaders.extend(parent_file.clone());
             for file in &include.including_files {
-                Self::update_parent(&file.1, parent_file, include_files, depth + 1);
+                Self::update_parent(&file.3, parent_file, include_files, depth + 1);
             }
             include_files.insert(include_path.clone(), include);
         }
@@ -193,6 +197,9 @@ impl IncludeFile {
                         let cap = RE_MACRO_INCLUDE.captures(line.1.as_str()).unwrap().get(1).unwrap();
                         let path: String = cap.as_str().into();
 
+                        let start = cap.start();
+                        let end = cap.end();
+
                         let sub_include_path = if path.starts_with('/') {
                             let path = path.strip_prefix('/').unwrap().to_string();
                             work_space.join(PathBuf::from_slash(&path))
@@ -200,7 +207,7 @@ impl IncludeFile {
                             include_path.parent().unwrap().join(PathBuf::from_slash(&path))
                         };
 
-                        include.including_files.push_back((line.0, sub_include_path.clone()));
+                        include.including_files.push_back((line.0, start, end, sub_include_path.clone()));
 
                         Self::get_includes(work_space, &sub_include_path, parent_file, include_files, depth + 1);
                     });
@@ -228,6 +235,9 @@ impl IncludeFile {
                 let cap = RE_MACRO_INCLUDE.captures(line.1.as_str()).unwrap().get(1).unwrap();
                 let path: String = cap.as_str().into();
 
+                let start = cap.start();
+                let end = cap.end();
+
                 let sub_include_path = if path.starts_with('/') {
                     let path = path.strip_prefix('/').unwrap().to_string();
                     self.work_space.join(PathBuf::from_slash(&path))
@@ -235,7 +245,7 @@ impl IncludeFile {
                     self.path.parent().unwrap().join(PathBuf::from_slash(&path))
                 };
 
-                self.including_files.push_back((line.0, sub_include_path.clone()));
+                self.including_files.push_back((line.0, start, end, sub_include_path.clone()));
 
                 Self::get_includes(&self.work_space, &sub_include_path, &self.included_shaders, include_files, 1);
             });
@@ -252,10 +262,7 @@ impl IncludeFile {
 
             let curr_file_id = file_id.clone();
             let mut including_files = self.including_files.clone();
-            let mut next_include_file = match including_files.pop_front() {
-                Some(include_file) => include_file,
-                None => (usize::from(u16::MAX), PathBuf::from("/")),
-            };
+            let mut next_include_file = Self::next_include_file(&mut including_files);
 
             let shader_reader = BufReader::new(std::fs::File::open(self.path.clone()).unwrap());
             shader_reader.lines()
@@ -266,14 +273,11 @@ impl IncludeFile {
                 })
                 .for_each(|line| {
                     if line.0 == next_include_file.0 {
-                        let include_file = include_files.get(&next_include_file.1).unwrap();
+                        let include_file = include_files.get(&next_include_file.3).unwrap();
                         *file_id += 1;
                         let sub_include_content = include_file.merge_include(&line.1, include_files, file_list, file_id, depth + 1);
                         include_content += &sub_include_content;
-                        next_include_file = match including_files.pop_front() {
-                            Some(include_file) => include_file,
-                            None => (usize::from(u16::MAX), PathBuf::from("/")),
-                        };
+                        next_include_file = Self::next_include_file(&mut including_files);
                         include_content += &format!("#line {} {}\n", line.0 + 2, curr_file_id);
                     }
                     else {
