@@ -1,1 +1,0 @@
-pub static SOURCE: &str = "mc-glsl";

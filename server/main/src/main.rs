@@ -33,7 +33,6 @@ use lazy_static::lazy_static;
 
 mod commands;
 mod configuration;
-mod consts;
 mod linemap;
 mod lsp_ext;
 mod navigation;

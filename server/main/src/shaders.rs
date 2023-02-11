@@ -8,7 +8,7 @@ use path_slash::PathBufExt;
 use regex::Regex;
 
 use lazy_static::lazy_static;
-use slog_scope::{error};
+use slog_scope::error;
 
 const OPTIFINE_MACROS: &str = "#define MC_VERSION 11900
 #define MC_GL_VERSION 320
@@ -50,6 +50,7 @@ const OPTIFINE_MACROS: &str = "#define MC_VERSION 11900
 lazy_static! {
     static ref RE_MACRO_INCLUDE: Regex = Regex::new(r#"^(?:\s)*?(?:#include) "(.+)"\r?"#).unwrap();
     static ref RE_MACRO_VERSION: Regex = Regex::new(r#"^(?:\s)*?(?:#version) \r?"#).unwrap();
+    static ref RE_MACRO_LINE: Regex = Regex::new(r#"^(?:\s)*?(?:#line) \r?"#).unwrap();
 }
 
 pub struct ShaderFile {
@@ -141,7 +142,7 @@ impl ShaderFile {
         let mut file_id = 0;
         let mut inserted_macro = self.work_space.parent().unwrap().file_name().unwrap() == "debug";
 
-        let shader_reader = BufReader::new(std::fs::File::open(self.path.clone()).unwrap());
+        let shader_reader = BufReader::new(std::fs::File::open(&self.path).unwrap());
         shader_reader.lines()
             .enumerate()
             .filter_map(|line| match line.1 {
@@ -152,10 +153,14 @@ impl ShaderFile {
                 if line.0 == next_include_file.0 {
                     let include_file = include_files.get(&next_include_file.3).unwrap();
                     file_id += 1;
-                    let include_content = include_file.merge_include(&line.1, include_files, file_list, &mut file_id, 1);
+                    let include_content = include_file.merge_include(line.1, include_files, file_list, &mut file_id, 1);
                     shader_content += &include_content;
                     next_include_file = IncludeFile::next_include_file(&mut including_files);
                     shader_content += &format!("#line {} 0\n", line.0 + 2);
+                }
+                else if RE_MACRO_LINE.is_match(&line.1) {
+                    // Delete existing #line for correct linting
+                    shader_content += "\n";
                 }
                 else {
                     shader_content += &line.1;
@@ -205,6 +210,8 @@ impl IncludeFile {
 
     pub fn update_parent(include_path: &PathBuf, parent_file: &HashSet<PathBuf>, include_files: &mut HashMap<PathBuf, IncludeFile>, depth: i32) {
         if depth > 10 {
+            // If include depth reaches 10 or file does not exist
+            // Leave the include alone for reporting a error
             return;
         }
         let mut include_file = include_files.remove(include_path).unwrap();
@@ -218,6 +225,8 @@ impl IncludeFile {
 
     pub fn get_includes(work_space: &PathBuf, include_path: &PathBuf, parent_file: &HashSet<PathBuf>, include_files: &mut HashMap<PathBuf, IncludeFile>, depth: i32) {
         if depth > 10 {
+            // If include depth reaches 10 or file does not exist
+            // Leave the include alone for reporting a error
             return;
         }
         if include_files.contains_key(include_path) {
@@ -304,9 +313,11 @@ impl IncludeFile {
             });
     }
 
-    pub fn merge_include(&self, original_content: &String, include_files: &HashMap<PathBuf, IncludeFile>, file_list: &mut HashMap<String, PathBuf>, file_id: &mut i32, depth: i32) -> String {
+    pub fn merge_include(&self, original_content: String, include_files: &HashMap<PathBuf, IncludeFile>, file_list: &mut HashMap<String, PathBuf>, file_id: &mut i32, depth: i32) -> String {
         if !self.path.exists() || depth > 10 {
-            original_content.clone() + "\n"
+            // If include depth reaches 10 or file does not exist
+            // Leave the include alone for reporting a error
+            original_content + "\n"
         }
         else {
             let mut include_content: String = String::new();
@@ -328,10 +339,14 @@ impl IncludeFile {
                     if line.0 == next_include_file.0 {
                         let include_file = include_files.get(&next_include_file.3).unwrap();
                         *file_id += 1;
-                        let sub_include_content = include_file.merge_include(&line.1, include_files, file_list, file_id, depth + 1);
+                        let sub_include_content = include_file.merge_include(line.1, include_files, file_list, file_id, depth + 1);
                         include_content += &sub_include_content;
                         next_include_file = Self::next_include_file(&mut including_files);
                         include_content += &format!("#line {} {}\n", line.0 + 2, curr_file_id);
+                    }
+                    else if RE_MACRO_LINE.is_match(&line.1) {
+                        // Delete existing #line for correct linting
+                        include_content += "\n";
                     }
                     else {
                         include_content += &line.1;

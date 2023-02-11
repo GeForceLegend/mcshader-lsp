@@ -13,7 +13,7 @@ use rust_lsp::lsp_types::{
 use slog_scope::debug;
 use url::Url;
 
-use crate::{opengl::{self, ShaderValidator}, consts};
+use crate::{opengl::{self, ShaderValidator}};
 
 pub struct DiagnosticsParser {
     line_offset: u32,
@@ -89,7 +89,7 @@ impl DiagnosticsParser {
                 ),
                 code: None,
                 severity: Some(severity),
-                source: Some(consts::SOURCE.into()),
+                source: Some("mc-glsl".into()),
                 message: msg.trim().into(),
                 related_information: None,
                 tags: None,
