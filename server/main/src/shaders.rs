@@ -51,6 +51,14 @@ lazy_static! {
     static ref RE_MACRO_INCLUDE: Regex = Regex::new(r#"^(?:\s)*?(?:#include) "(.+)"\r?"#).unwrap();
     static ref RE_MACRO_VERSION: Regex = Regex::new(r#"^(?:\s)*?(?:#version) \r?"#).unwrap();
     static ref RE_MACRO_LINE: Regex = Regex::new(r#"^(?:\s)*?(?:#line) \r?"#).unwrap();
+    static ref DEFAULT_INCLUDE_FILE: (usize, usize, usize, PathBuf) = (usize::from(u16::MAX), usize::from(u16::MAX), usize::from(u16::MAX), PathBuf::from("/"));
+}
+
+fn load_cursor_content(cursor_content: Option<&(usize, usize, usize, PathBuf)>) -> &(usize, usize, usize, PathBuf) {
+    match cursor_content {
+        Some(include_file) => include_file,
+        None => &DEFAULT_INCLUDE_FILE,
+    }
 }
 
 pub struct ShaderFile {
@@ -133,10 +141,13 @@ impl ShaderFile {
     pub fn merge_shader_file(&self, include_files: &HashMap<PathBuf, IncludeFile>, file_list: &mut HashMap<String, PathBuf>) -> String {
         let mut shader_content: String = String::new();
         file_list.insert("0".to_owned(), self.path.clone());
-
-        let mut including_files = self.including_files.clone();
-        let mut next_include_file = IncludeFile::next_include_file(&mut including_files);
         let mut file_id = 0;
+
+        // Get a cursor pointed to the first position of LinkedList, and we can get data without have to clone one and pop_front()!
+        let mut including_files = self.including_files.cursor_front();
+        let mut next_include_file = load_cursor_content(including_files.current());
+
+        // If we are in the debug folder, do not add Optifine's macros
         let mut macro_inserted = self.work_space.parent().unwrap().file_name().unwrap() == "debug";
 
         let shader_reader = BufReader::new(std::fs::File::open(&self.path).unwrap());
@@ -152,7 +163,10 @@ impl ShaderFile {
                     file_id += 1;
                     let include_content = include_file.merge_include(line.1, include_files, file_list, &mut file_id, 1);
                     shader_content += &include_content;
-                    next_include_file = IncludeFile::next_include_file(&mut including_files);
+                    // Move cursor to the next position and get the value
+                    including_files.move_next();
+                    next_include_file = load_cursor_content(including_files.current());
+
                     shader_content += &format!("#line {} 0\n", line.0 + 2);
                 }
                 else if RE_MACRO_LINE.is_match(&line.1) {
@@ -162,6 +176,7 @@ impl ShaderFile {
                 else {
                     shader_content += &line.1;
                     shader_content += "\n";
+                    // If we are not in the debug folder, add Optifine's macros for correct linting
                     if RE_MACRO_VERSION.is_match(line.1.as_str()) && !macro_inserted {
                         shader_content += OPTIFINE_MACROS;
                         shader_content += &format!("#line {} 0\n", line.0 + 2);
@@ -196,13 +211,6 @@ impl IncludeFile {
 
     pub fn including_files(&self) -> &LinkedList<(usize, usize, usize, PathBuf)> {
         &self.including_files
-    }
-
-    pub fn next_include_file(including_files: &mut LinkedList<(usize, usize, usize, PathBuf)>) -> (usize, usize, usize, PathBuf) {
-        match including_files.pop_front() {
-            Some(include_file) => include_file,
-            None => (usize::from(u16::MAX), usize::from(u16::MAX), usize::from(u16::MAX), PathBuf::from("/")),
-        }
     }
 
     pub fn update_parent(include_path: &PathBuf, parent_file: &HashSet<PathBuf>, include_files: &mut HashMap<PathBuf, IncludeFile>, depth: i32) {
@@ -312,18 +320,17 @@ impl IncludeFile {
 
     pub fn merge_include(&self, original_content: String, include_files: &HashMap<PathBuf, IncludeFile>, file_list: &mut HashMap<String, PathBuf>, file_id: &mut i32, depth: i32) -> String {
         if !self.path.exists() || depth > 10 {
-            // If include depth reaches 10 or file does not exist
-            // Leave the include alone for reporting a error
             original_content + "\n"
         }
         else {
             let mut include_content: String = String::new();
             file_list.insert(file_id.to_string(), self.path.clone());
             include_content += &format!("#line 1 {}\n", &file_id.to_string());
-
             let curr_file_id = file_id.clone();
-            let mut including_files = self.including_files.clone();
-            let mut next_include_file = Self::next_include_file(&mut including_files);
+
+            // Get a cursor pointed to the first position of LinkedList, and we can get data without have to clone one and pop_front()!
+            let mut including_files = self.including_files.cursor_front();
+            let mut next_include_file = load_cursor_content(including_files.current());
 
             let shader_reader = BufReader::new(std::fs::File::open(&self.path).unwrap());
             shader_reader.lines()
@@ -338,7 +345,10 @@ impl IncludeFile {
                         *file_id += 1;
                         let sub_include_content = include_file.merge_include(line.1, include_files, file_list, file_id, depth + 1);
                         include_content += &sub_include_content;
-                        next_include_file = Self::next_include_file(&mut including_files);
+                        // Move cursor to the next position and get the value
+                        including_files.move_next();
+                        next_include_file = load_cursor_content(including_files.current());
+
                         include_content += &format!("#line {} {}\n", line.0 + 2, curr_file_id);
                     }
                     else if RE_MACRO_LINE.is_match(&line.1) {

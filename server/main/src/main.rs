@@ -1,4 +1,5 @@
 #![feature(option_get_or_insert_default)]
+#![feature(linked_list_cursors)]
 
 use rust_lsp::jsonrpc::{method_types::*, *};
 use rust_lsp::lsp::*;
@@ -13,7 +14,7 @@ use url_norm::FromUrl;
 use std::collections::{HashMap, HashSet, LinkedList};
 use std::convert::TryFrom;
 use std::io::{stdin, stdout};
-use std::iter::{Extend};
+use std::iter::Extend;
 use std::rc::Rc;
 
 use std::{
