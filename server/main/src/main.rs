@@ -116,7 +116,7 @@ fn main() {
 
     let mut langserver = MinecraftShaderLanguageServer {
         endpoint: endpoint_output.clone(),
-        root: "".into(),
+        roots: Vec::new(),
         command_provider: None,
         opengl_context: opengl_context.clone(),
         tree_sitter: Rc::new(RefCell::new(parser)),
@@ -140,7 +140,7 @@ fn main() {
 
 pub struct MinecraftShaderLanguageServer {
     endpoint: Endpoint,
-    root: PathBuf,
+    roots: Vec<PathBuf>,
     command_provider: Option<commands::CustomCommandProvider>,
     opengl_context: Rc<dyn opengl::ShaderValidator>,
     tree_sitter: Rc<RefCell<Parser>>,
@@ -199,22 +199,24 @@ impl MinecraftShaderLanguageServer {
     }
 
     fn build_file_framework(&mut self) {
-        info!("generating file framework on current root"; "root" => self.root.to_str().unwrap());
+        for root in self.roots.clone() {
+            info!("generating file framework on current root"; "root" => root.to_str().unwrap());
 
-        let work_spaces: HashSet<PathBuf> = self.find_work_space(&self.root);
-        for work_space in &work_spaces {
-            for file in work_space.read_dir().expect("read work space failed") {
-                if let Ok(file) = file {
-                    let file_path = file.path();
-                    if file_path.is_file() {
-                        self.add_shader_file(work_space, file_path);
-                    }
-                    else if file_path.is_dir() && RE_DIMENSION_FOLDER.is_match(file_path.file_name().unwrap().to_str().unwrap()) {
-                        for dim_file in file_path.read_dir().expect("read dimension folder failed") {
-                            if let Ok(dim_file) = dim_file {
-                                let file_path = dim_file.path();
-                                if file_path.is_file() {
-                                    self.add_shader_file(work_space, file_path);
+            let work_spaces: HashSet<PathBuf> = self.find_work_space(&root);
+            for work_space in &work_spaces {
+                for file in work_space.read_dir().expect("read work space failed") {
+                    if let Ok(file) = file {
+                        let file_path = file.path();
+                        if file_path.is_file() {
+                            self.add_shader_file(work_space, file_path);
+                        }
+                        else if file_path.is_dir() && RE_DIMENSION_FOLDER.is_match(file_path.file_name().unwrap().to_str().unwrap()) {
+                            for dim_file in file_path.read_dir().expect("read dimension folder failed") {
+                                if let Ok(dim_file) = dim_file {
+                                    let file_path = dim_file.path();
+                                    if file_path.is_file() {
+                                        self.add_shader_file(work_space, file_path);
+                                    }
                                 }
                             }
                         }
@@ -285,7 +287,6 @@ impl MinecraftShaderLanguageServer {
     }
 
     pub fn publish_diagnostic(&self, diagnostics: HashMap<Url, Vec<Diagnostic>>, document_version: Option<i32>) {
-        // info!("DIAGNOSTICS:\n{:?}", diagnostics);
         for (uri, diagnostics) in diagnostics {
             self.endpoint
                 .send_notification(
@@ -341,17 +342,26 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
                 ..ServerCapabilities::default()
             };
 
-            let root = match params.root_uri {
-                Some(uri) => PathBuf::from_url(uri),
-                None => {
-                    completable.complete(Err(MethodError {
-                        code: 42069,
-                        message: "Must be in workspace".into(),
-                        data: InitializeError { retry: false },
-                    }));
-                    return;
+            let mut roots: Vec<PathBuf> = Vec::new();
+            if params.workspace_folders.is_none() {
+                let root = match params.root_uri {
+                    Some(uri) => PathBuf::from_url(uri),
+                    None => {
+                        completable.complete(Err(MethodError {
+                            code: 42069,
+                            message: "Must be in workspace".into(),
+                            data: InitializeError { retry: false },
+                        }));
+                        return;
+                    }
+                };
+                roots.push(root);
+            }
+            else {
+                for root in params.workspace_folders.unwrap() {
+                    roots.push(PathBuf::from_url(root.uri));
                 }
-            };
+            }
 
             completable.complete(Ok(InitializeResult {
                 capabilities,
@@ -360,7 +370,7 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
 
             self.set_status("loading", "Building file framework...", "$(loading~spin)");
 
-            self.root = root;
+            self.roots.extend(roots);
 
             self.build_file_framework();
 
@@ -471,7 +481,7 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
                 .command_provider
                 .as_ref()
                 .unwrap()
-                .execute(&params.command, &params.arguments, &self.root)
+                .execute(&params.command, &params.arguments, &self.roots.get(0).unwrap())
             {
                 Ok(resp) => {
                     info!("executed command successfully"; "command" => params.command.clone());
@@ -510,7 +520,11 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
     fn goto_definition(&mut self, params: TextDocumentPositionParams, completable: LSCompletable<Vec<Location>>) {
         logging::slog_with_trace_id(|| {
             let path = PathBuf::from_url(params.text_document.uri);
-            if !path.starts_with(&self.root) {
+            let mut inpath = false;
+            for root in &self.roots {
+                inpath = path.starts_with(root) || inpath;
+            }
+            if !inpath {
                 return;
             }
             let parser = &mut self.tree_sitter.borrow_mut();
@@ -539,7 +553,11 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
     fn references(&mut self, params: ReferenceParams, completable: LSCompletable<Vec<Location>>) {
         logging::slog_with_trace_id(|| {
             let path = PathBuf::from_url(params.text_document_position.text_document.uri);
-            if !path.starts_with(&self.root) {
+            let mut inpath = false;
+            for root in &self.roots {
+                inpath = path.starts_with(root) || inpath;
+            }
+            if !inpath {
                 return;
             }
             let parser = &mut self.tree_sitter.borrow_mut();
@@ -572,9 +590,14 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
     fn document_symbols(&mut self, params: DocumentSymbolParams, completable: LSCompletable<DocumentSymbolResponse>) {
         logging::slog_with_trace_id(|| {
             let path = PathBuf::from_url(params.text_document.uri);
-            if !path.starts_with(&self.root) {
+            let mut inpath = false;
+            for root in &self.roots {
+                inpath = path.starts_with(root) || inpath;
+            }
+            if !inpath {
                 return;
             }
+
             let parser = &mut self.tree_sitter.borrow_mut();
             let parser_ctx = match navigation::ParserContext::new(parser, &path) {
                 Ok(ctx) => ctx,
