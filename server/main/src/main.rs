@@ -12,7 +12,6 @@ use url_norm::FromUrl;
 
 use std::collections::{HashMap, HashSet, LinkedList};
 use std::convert::TryFrom;
-use std::fmt::{Debug, Display, Formatter};
 use std::io::{stdin, stdout};
 use std::iter::{Extend};
 use std::rc::Rc;
@@ -24,8 +23,6 @@ use std::{
 
 use slog::Level;
 use slog_scope::{error, info, warn};
-
-use anyhow::{Result};
 
 use regex::Regex;
 
@@ -152,36 +149,6 @@ pub struct MinecraftShaderLanguageServer {
     diagnostics_parser: parser::DiagnosticsParser,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct IncludePosition {
-    // the 0-indexed line on which the include lives.
-    line: usize,
-    // the 0-indexed char offset defining the start of the include path string.
-    start: usize,
-    // the 0-indexed char offset defining the end of the include path string.
-    end: usize,
-}
-
-impl Debug for IncludePosition {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{{line: {}}}", self.line)
-    }
-}
-
-impl Display for IncludePosition {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "{{line: {}}}", self.line)
-    }
-}
-
-#[derive(Debug)]
-pub enum TreeType {
-    Fragment,
-    Vertex,
-    Geometry,
-    Compute,
-}
-
 impl MinecraftShaderLanguageServer {
     pub fn error_not_available<DATA>(data: DATA) -> MethodError<DATA> {
         let msg = "Functionality not implemented.".to_string();
@@ -212,11 +179,11 @@ impl MinecraftShaderLanguageServer {
         work_spaces
     }
 
-    fn add_shader_file(&mut self, work_space: &PathBuf, file_path: &PathBuf) {
+    fn add_shader_file(&mut self, work_space: &PathBuf, file_path: PathBuf) {
         if RE_DEFAULT_SHADERS.contains(file_path.file_name().unwrap().to_str().unwrap()) {
             let mut shader_file = shaders::ShaderFile::new(work_space, &file_path);
             shader_file.read_file(&mut self.include_files);
-            self.shader_files.insert(file_path.clone(), shader_file);
+            self.shader_files.insert(file_path, shader_file);
         }
     }
 
@@ -239,14 +206,14 @@ impl MinecraftShaderLanguageServer {
                 if let Ok(file) = file {
                     let file_path = file.path();
                     if file_path.is_file() {
-                        self.add_shader_file(work_space, &file_path);
+                        self.add_shader_file(work_space, file_path);
                     }
                     else if file_path.is_dir() && RE_DIMENSION_FOLDER.is_match(file_path.file_name().unwrap().to_str().unwrap()) {
                         for dim_file in file_path.read_dir().expect("read dimension folder failed") {
                             if let Ok(dim_file) = dim_file {
                                 let file_path = dim_file.path();
                                 if file_path.is_file() {
-                                    self.add_shader_file(work_space, &file_path);
+                                    self.add_shader_file(work_space, file_path);
                                 }
                             }
                         }
@@ -258,10 +225,9 @@ impl MinecraftShaderLanguageServer {
 
     fn update_file(&mut self, path: &PathBuf) {
         if self.shader_files.contains_key(path) {
-            let mut shader_file = self.shader_files.remove(path).unwrap();
+            let shader_file = self.shader_files.get_mut(path).unwrap();
             shader_file.clear_including_files();
             shader_file.read_file(&mut self.include_files);
-            self.shader_files.insert(path.clone(), shader_file);
         }
         if self.include_files.contains_key(path) {
             let mut include_file = self.include_files.remove(path).unwrap();
@@ -280,7 +246,7 @@ impl MinecraftShaderLanguageServer {
         let mut file_list: HashMap<String, PathBuf> = HashMap::new();
         let shader_content = shader_file.merge_shader_file(&self.include_files, &mut file_list);
 
-        let validation_result = self.opengl_context.clone().validate_shader(shader_file.file_type(), &shader_content);
+        let validation_result = self.opengl_context.validate_shader(shader_file.file_type(), &shader_content);
 
         // Copied from original file
         match &validation_result {
@@ -290,9 +256,9 @@ impl MinecraftShaderLanguageServer {
             None => {
                 info!("compilation reported no errors"; "tree_root" => path.to_str().unwrap());
                 let mut diagnostics: HashMap<Url, Vec<Diagnostic>> = HashMap::new();
-                diagnostics.entry(Url::from_file_path(path.clone()).unwrap()).or_default();
+                diagnostics.entry(Url::from_file_path(path).unwrap()).or_default();
                 for include_file in shader_file.including_files() {
-                    diagnostics.entry(Url::from_file_path(include_file.3.clone()).unwrap()).or_default();
+                    diagnostics.entry(Url::from_file_path(&include_file.3).unwrap()).or_default();
                 }
                 return diagnostics;
             },
@@ -308,13 +274,13 @@ impl MinecraftShaderLanguageServer {
             diagnostics.extend(self.lint_shader(path));
         }
         if self.include_files.contains_key(path) {
-            let shader_files = self.include_files.get(path).unwrap().clone();
+            let shader_files = self.include_files.get(path).unwrap();
             for shader_path in shader_files.included_shaders().clone() {
                 diagnostics.extend(self.lint_shader(&shader_path));
             }
         }
         self.publish_diagnostic(diagnostics, None);
-        self.set_status("ready", "Compiled all changed files", "$(check)");
+        self.set_status("ready", "Compiled all changed shaders", "$(check)");
     }
 
     pub fn publish_diagnostic(&self, diagnostics: HashMap<Url, Vec<Diagnostic>>, document_version: Option<i32>) {
@@ -391,7 +357,7 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
                 server_info: None,
             }));
 
-            self.set_status("loading", "Building dependency graph...", "$(loading~spin)");
+            self.set_status("loading", "Building file framework...", "$(loading~spin)");
 
             self.root = root;
 
@@ -651,15 +617,15 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
 
     fn document_link(&mut self, params: DocumentLinkParams, completable: LSCompletable<Vec<DocumentLink>>) {
         logging::slog_with_trace_id(|| {
-            // node for current document
+            // Current document path
             let curr_doc = PathBuf::from_url(params.text_document.uri);
-            
-            let include_list: LinkedList<(usize, usize, usize, PathBuf)>;
+
+            let include_list: &LinkedList<(usize, usize, usize, PathBuf)>;
             if self.shader_files.contains_key(&curr_doc) {
-                include_list = self.shader_files.get(&curr_doc).unwrap().including_files().clone();
+                include_list = self.shader_files.get(&curr_doc).unwrap().including_files();
             }
             else if self.include_files.contains_key(&curr_doc) {
-                include_list = self.include_files.get(&curr_doc).unwrap().including_files().clone();
+                include_list = self.include_files.get(&curr_doc).unwrap().including_files();
             }
             else {
                 warn!("document not found in file system"; "path" => curr_doc.to_str().unwrap());
@@ -667,22 +633,23 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
                 return;
             }
 
-            let mut include_links: Vec<DocumentLink> = Vec::new();
-            for include_file in include_list {
-                let path = include_file.3;
-                let url = Url::from_file_path(&path).unwrap();
-                include_links.push(
+            let include_links = include_list
+                .iter()
+                .map(|include_file| {
+                    let path = &include_file.3;
+                    let url = Url::from_file_path(path).unwrap();
                     DocumentLink {
                         range: Range::new(
                             Position::new(u32::try_from(include_file.0).unwrap(), u32::try_from(include_file.1).unwrap()),
                             Position::new(u32::try_from(include_file.0).unwrap(), u32::try_from(include_file.2).unwrap()),
                         ),
-                        target: Some(url.clone()),
                         tooltip: Some(url.path().to_string()),
+                        target: Some(url),
                         data: None,
                     }
-                )
-            }
+                })
+                .collect();
+
             completable.complete(Ok(include_links));
         });
     }
