@@ -140,7 +140,7 @@ impl ShaderFile {
         let mut including_files = self.including_files.clone();
         let mut next_include_file = IncludeFile::next_include_file(&mut including_files);
         let mut file_id = 0;
-        let mut inserted_macro = self.work_space.parent().unwrap().file_name().unwrap() == "debug";
+        let mut macro_inserted = self.work_space.parent().unwrap().file_name().unwrap() == "debug";
 
         let shader_reader = BufReader::new(std::fs::File::open(&self.path).unwrap());
         shader_reader.lines()
@@ -165,10 +165,10 @@ impl ShaderFile {
                 else {
                     shader_content += &line.1;
                     shader_content += "\n";
-                    if RE_MACRO_VERSION.is_match(line.1.as_str()) && !inserted_macro {
+                    if RE_MACRO_VERSION.is_match(line.1.as_str()) && !macro_inserted {
                         shader_content += OPTIFINE_MACROS;
                         shader_content += &format!("#line {} 0\n", line.0 + 2);
-                        inserted_macro = true;
+                        macro_inserted = true;
                     }
                 }
             });

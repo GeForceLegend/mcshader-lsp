@@ -43,7 +43,7 @@ mod url_norm;
 
 lazy_static! {
     static ref RE_DIMENSION_FOLDER: Regex = Regex::new(r#"^world-?\d+"#).unwrap();
-    static ref TOPLEVEL_FILES: HashSet<String> = {
+    static ref RE_DEFAULT_SHADERS: HashSet<String> = {
         let mut set = HashSet::with_capacity(1716);
         for ext in ["fsh", "vsh", "gsh", "csh"] {
             set.insert(format!("composite.{}", ext));
@@ -213,7 +213,7 @@ impl MinecraftShaderLanguageServer {
     }
 
     fn add_shader_file(&mut self, work_space: &PathBuf, file_path: &PathBuf) {
-        if TOPLEVEL_FILES.contains(file_path.file_name().unwrap().to_str().unwrap()) {
+        if RE_DEFAULT_SHADERS.contains(file_path.file_name().unwrap().to_str().unwrap()) {
             let mut shader_file = shaders::ShaderFile::new(work_space, &file_path);
             shader_file.read_file(&mut self.include_files);
             self.shader_files.insert(file_path.clone(), shader_file);
@@ -453,6 +453,9 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
 
     fn did_change_watched_files(&mut self, params: DidChangeWatchedFilesParams) {
         logging::slog_with_trace_id(|| {
+            // Collect all shaders in changed include files into this set
+            // This can avoid linting duplicate shaders
+            let mut updated_shaders: HashSet<PathBuf> = HashSet::new();
             for change in params.changes {
                 let path = PathBuf::from_url(change.uri);
                 if change.typ == FileChangeType::DELETED {
@@ -460,10 +463,19 @@ impl LanguageServerHandling for MinecraftShaderLanguageServer {
                         self.remove_shader_file(&path);
                     }
                 }
-                else if self.shader_files.contains_key(&path) || self.include_files.contains_key(&path) {
+                else if self.shader_files.contains_key(&path){
                     self.update_file(&path);
-                    self.update_lint(&path); 
+                    updated_shaders.insert(path);
                 }
+                else if self.include_files.contains_key(&path) {
+                    self.update_file(&path);
+                    updated_shaders.extend(self.include_files.get(&path).unwrap().included_shaders().clone());
+                }
+            }
+            // Lint all collected parent
+            for shader in updated_shaders {
+                // We are sure that all pathes are shader files but not include files
+                self.lint_shader(&shader);
             }
         })
     }
